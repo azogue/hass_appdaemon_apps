@@ -94,7 +94,7 @@ class MotionLights(appapi.AppDaemon):
 
     # noinspection PyUnusedLocal
     def turn_off_motion_lights(self, entity, attribute, old, new, kwargs):
-        """Method for turning off after some timeout the motion-controlled lights."""
+        """Method for turning off the motion-controlled lights after some time without any movement."""
         if self.motion_lights_running and self.extra_condition and not self.media_player_active:
             self.log('EN TURN_OFF MOTION_LIGHTS, other lights={}'
                      .format([self.get_state(l) for l in self.other_lights_room]), LOG_LEVEL)

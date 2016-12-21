@@ -163,20 +163,21 @@ class KodiAssistant(appapi.AppDaemon):
             self.is_playing_video = self.kodi_is_playing_video()
             self.log('KODI START. old:{}, new:{}, is_playing_video={}'
                      .format(old, new, self.is_playing_video), LOG_LEVEL)
-            item_playing = self.get_current_playing_item()
+            if self.is_playing_video:
+                item_playing = self.get_current_playing_item()
 
-            new_video = False
-            if (self.item_playing is not None) or (self.item_playing != item_playing):
-                self.item_playing = item_playing
-                new_video = True
+                new_video = False
+                if (self.item_playing is not None) or (self.item_playing != item_playing):
+                    self.item_playing = item_playing
+                    new_video = True
 
-            now = ha.get_now()
-            if (self.last_play is None) or (now - self.last_play > dt.timedelta(minutes=1)):
-                self.last_play = now
-                if new_video:  # Notify
-                    self.call_service('notify/ios_iphone', **self._make_ios_message(new, item=self.item_playing))
+                now = ha.get_now()
+                if (self.last_play is None) or (now - self.last_play > dt.timedelta(minutes=1)):
+                    self.last_play = now
+                    if new_video and (self.notifier is not None):  # Notify
+                        self.call_service(self.notifier, **self._make_ios_message(new, item=self.item_playing))
 
-            self._adjust_kodi_lights(play=True)
+                self._adjust_kodi_lights(play=True)
         elif (old == 'playing') and self.is_playing_video:
             self.is_playing_video = False
             self.last_play = ha.get_now()

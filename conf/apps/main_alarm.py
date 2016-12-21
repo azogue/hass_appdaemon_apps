@@ -1,4 +1,11 @@
 # -*- coding: utf-8 -*-
+"""
+Automation task as a AppDaemon App for Home Assistant
+
+This little app has to control the alarm state of the house, sending notifications on alert & more.
+This is a work in progress...
+
+"""
 import appdaemon.appapi as appapi
 from itertools import cycle
 
@@ -10,7 +17,7 @@ DEFAULT_ALARM_COLORS = [(255, 0, 0), (50, 0, 255)]
 
 # noinspection PyClassHasNoInit
 class MyAlarm(appapi.AppDaemon):
-    """App for handle main intrusion alarm."""
+    """App for handle the main intrusion alarm."""
     pir = None
     camera = None
     light_notify = None

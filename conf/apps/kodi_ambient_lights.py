@@ -1,4 +1,13 @@
 # -*- coding: utf-8 -*-
+"""
+Automation task as a AppDaemon App for Home Assistant
+
+This little app controls the ambient light when Kodi plays video, dimming some lights and turning off others,
+and returning to the initial state when the playback is finished.
+In addition, it also sends notifications when starting the video playback, reporting the video info in the message.
+For that, it talks directly with Kodi through its JSONRPC API
+
+"""
 import datetime as dt
 import appdaemon.appapi as appapi
 import requests

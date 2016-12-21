@@ -1,4 +1,12 @@
 # -*- coding: utf-8 -*-
+"""
+Automation task as a AppDaemon App for Home Assistant
+
+This little app controls some hue lights for turning them ON with motion detection,
+only under some custom circunstances, like the media player is not running,
+or there aren't any more lights in 'on' state in the room.
+
+"""
 import appdaemon.appapi as appapi
 
 

@@ -22,7 +22,7 @@ import requests
 DEFAULT_DURATION = 1  # h
 DEFAULT_EMISION_TIME = "08:30:00"
 MAX_WAIT_TIME = pd.Timedelta(minutes=15)
-STEP_RETRYING = pd.Timedelta(seconds=15)
+STEP_RETRYING_SEC = 15
 WARM_UP_TIME_DELTA = pd.Timedelta(seconds=35)
 MIN_INTERVAL_BETWEEN_EPS = pd.Timedelta(hours=6)
 
@@ -163,7 +163,7 @@ class AlarmClock(appapi.AppDaemon):
 
     # noinspection PyUnusedLocal
     def _check_alarm_day(self, *args):
-        now = dt.datetime.now()
+        now = self.datetime()
         if self.next_alarm + WARM_UP_TIME_DELTA < now:  # - dt.timedelta(minutes=1):
             next_day = self.next_alarm + dt.timedelta(days=1)
             while next_day.weekday() not in self.weekdays_alarm:
@@ -178,7 +178,7 @@ class AlarmClock(appapi.AppDaemon):
             self.cancel_timer(self.handle_alarm)
         time_alarm = reduce(lambda x, y: x.replace(**{y[1]: int(y[0])}),
                             zip(self.get_state(self.alarm_time_sensor).split(':'), ['hour', 'minute', 'second']),
-                            dt.datetime.now().replace(second=0, microsecond=0))
+                            self.datetime().replace(second=0, microsecond=0))
         self.next_alarm = time_alarm - WARM_UP_TIME_DELTA
         self._check_alarm_day()
         self.handle_alarm = self.run_at(self.run_alarm, self.next_alarm)
@@ -236,15 +236,13 @@ class AlarmClock(appapi.AppDaemon):
         alarm_ready, alarm_info = is_last_episode_ready_for_play(self.tz)
         self.log('is_alarm_ready_to_trigger? {}, info={}'.format(alarm_ready, alarm_info), LOG_LEVEL)
         if alarm_ready:
-            # self.call_service('light/turn_on', entity_id=self.lights_alarm,
-            #                   profile='energize', transition=30, brightness=255)
             self.turn_on_lights_as_sunrise()
             self.run_kodi_addon_lacafetera(mode='playlast')
             # Notification:
             self.call_service(self.notifier.replace('.', '/'), **make_notification_episode(alarm_info))
         else:
             self.log('POSTPONE ALARM, alarm_info={}'.format(alarm_info), LOG_LEVEL)
-            self.run_in(self.trigger_service_in_alarm, STEP_RETRYING)
+            self.run_in(self.trigger_service_in_alarm, STEP_RETRYING_SEC)
 
     # noinspection PyUnusedLocal
     def run_alarm(self, *args):

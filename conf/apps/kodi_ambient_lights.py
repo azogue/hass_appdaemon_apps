@@ -118,8 +118,7 @@ class KodiAssistant(appapi.AppDaemon):
     #         #     d_art_local[name] = local_file
     #     return d_art_local
 
-    @staticmethod
-    def _make_ios_message(state, item=None):
+    def _make_ios_message(self, state, item=None):
         if item is None:
             title = "KODI state"
             message = "New state is *{}*".format(state)
@@ -127,7 +126,14 @@ class KodiAssistant(appapi.AppDaemon):
         else:
             title = "KODI {} {} [{}]".format(state if state is not None else 'Playing:', item['title'], item['year'])
             message = "{}\nDuración: {:.2f}h.\nitem: {}".format(item['plot'], item['runtime'] / 3600, item)
-            img_url = parse.unquote_plus(item['art']['poster']).rstrip('/').lstrip('image://')
+            if 'poster' in item['art']:
+                k = 'poster'
+            elif 'season.poster' in item['art']:
+                k = 'season.poster'
+            else:
+                self.log('No poster in item[art]={}'.format(item['art']))
+                k = list(item['art'].keys())[0]
+            img_url = parse.unquote_plus(item['art'][k]).rstrip('/').lstrip('image://')
             try:
                 data_msg = {"title": title, "message": message,
                             "data": {"attachment": img_url, "content-type": "jpg", "hide-thumbnail": "false"}}
@@ -184,7 +190,8 @@ class KodiAssistant(appapi.AppDaemon):
                 if (self.last_play is None) or (now - self.last_play > dt.timedelta(minutes=1)):
                     self.last_play = now
                     if new_video and (self.notifier is not None):  # Notify
-                        self.call_service(self.notifier, **self._make_ios_message(new, item=self.item_playing))
+                        self.call_service(self.notifier.replace('.', '/'),
+                                          **self._make_ios_message(new, item=self.item_playing))
 
                 self._adjust_kodi_lights(play=True)
         elif (old == 'playing') and self.is_playing_video:

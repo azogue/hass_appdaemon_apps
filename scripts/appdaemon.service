@@ -1,0 +1,22 @@
+# name: /etc/systemd/system/appdaemon.service
+#
+# Sample unit file for systemd
+#
+# Edit top suit your environment, then copy to /etc/systemd/system
+#
+# With user PI, run "sudo systemd enable appdaemon" to make it start at boottime
+#
+# Start/stop/status:
+# sudo service appdaemon start | stop | status
+#
+[Unit]
+Description=My AppDaemon service for Home Assistant
+
+[Service]
+# RPI2 - Slave HASS:
+# ExecStart=/srv/homeassistant/bin/appdaemon -c /home/homeassistant/appdaemon/conf/appdaemon.cfg
+# RPI3 - Master HASS:
+ExecStart=/srv/homeassistant/homeassistant_venv/bin/appdaemon -c /home/homeassistant/.homeassistant/hass_appdaemon_apps/conf/appdaemon.cfg
+
+[Install]
+WantedBy=multi-user.target

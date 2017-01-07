@@ -17,49 +17,49 @@ LOG_LEVEL = 'DEBUG'
 class MotionLights(appapi.AppDaemon):
     """App for control lights with a motion sensor."""
 
-    extra_constrain_input_boolean = None
-    pir = None
-    motion_light_timeout = None
-    lights_motion = None
-    other_lights_room = None
-    media_player = None
+    _pir = None
+    _motion_light_timeout = None
+    _lights_motion = None
+    _other_lights_room = None
+    _media_player = None
+    _extra_constrain_input_boolean = None
 
-    handle_motion_on = None
-    handle_motion_off = None
+    _handle_motion_on = None
+    _handle_motion_off = None
 
-    motion_lights_running = False
-    extra_condition = True
-    media_player_active = False
-    lights_motion_active = {}
+    _motion_lights_running = False
+    _extra_condition = True
+    _media_player_active = False
+    _lights_motion_active = {}
 
     def initialize(self):
         """AppDaemon required method for app init."""
+        conf_data = dict(self.config['AppDaemon'])
         pir = self.args.get('pir', None)
-        self.extra_constrain_input_boolean = self.args.get('constrain_input_boolean_2', None)
+        self._extra_constrain_input_boolean = self.args.get('constrain_input_boolean_2', None)
         motion_light_timeout_slider = self.args.get('motion_light_timeout', None)
-        self.lights_motion = self.args.get('lights_motion', '')
-        g_all_lights = self.args.get('all_lights_group', 'group.light')
-        all_lights = self.get_state(g_all_lights, 'attributes')['entity_id']
-        self.other_lights_room = [l for l in all_lights if l not in self.lights_motion.split(',')]
-        self.media_player = self.args.get('media_player', None)
+        self._lights_motion = self.args.get('lights_motion', '')
+        self._other_lights_room = self.args.get('lights_check_off', '').split(',')
+        self._media_player = conf_data.get('media_player', None)
 
-        if pir and motion_light_timeout_slider and self.lights_motion:
-            for l in self.lights_motion.split(','):
-                self.lights_motion_active[l] = self.get_state(l) == 'on'
+        if pir and motion_light_timeout_slider and self._lights_motion:
+            for l in self._lights_motion.split(','):
+                self._lights_motion_active[l] = self.get_state(l) == 'on'
                 self.listen_state(self._light_motion_state, l)
-            self.motion_light_timeout = int(round(float(self.get_state(motion_light_timeout_slider))))
+            self._motion_light_timeout = int(round(float(self.get_state(motion_light_timeout_slider))))
             self.listen_state(self._set_motion_timeout, motion_light_timeout_slider)
-            self.pir = pir
-            self.handle_motion_on = self.listen_state(self.turn_on_motion_lights, self.pir, new="on")
+            self._pir = pir
+            self._handle_motion_on = self.listen_state(self.turn_on_motion_lights, self._pir,
+                                                       new="on", duration=2)
             # self.handle_motion_off = self.listen_state(self.motion_state_off, self.pir,
             #                                            new="off", duration=self.motion_light_timeout)
-            if self.media_player is not None:
-                self.media_player_active = self.get_state(self.media_player) == 'playing'
-                self.listen_state(self._media_player_state_ch, self.media_player)
+            if self._media_player is not None:
+                self._media_player_active = self.get_state(self._media_player) == 'playing'
+                self.listen_state(self._media_player_state_ch, self._media_player)
 
-            if self.extra_constrain_input_boolean is not None:
-                self.extra_condition = self.get_state(self.extra_constrain_input_boolean) == 'off'
-                self.listen_state(self._extra_switch_change, self.extra_constrain_input_boolean)
+            if self._extra_constrain_input_boolean is not None:
+                self._extra_condition = self.get_state(self._extra_constrain_input_boolean) == 'off'
+                self.listen_state(self._extra_switch_change, self._extra_constrain_input_boolean)
         else:
             self.log('No se inicializa MotionLights, faltan parámetros (req: {})'
                      .format('motion_light_timeout, switch_light_motion, lights_motion, pir'), level='ERROR')
@@ -67,48 +67,49 @@ class MotionLights(appapi.AppDaemon):
     # noinspection PyUnusedLocal
     def _media_player_state_ch(self, entity, attribute, old, new, kwargs):
         self.log('media_player_state_ch change: {} from {} to {}'.format(entity, old, new))
-        self.media_player_active = new == 'playing'
+        self._media_player_active = new == 'playing'
 
     # noinspection PyUnusedLocal
     def _extra_switch_change(self, entity, attribute, old, new, kwargs):
         self.log('Extra switch condition change: {} from {} to {}'.format(entity, old, new))
-        self.extra_condition = new == 'off'
+        self._extra_condition = new == 'off'
 
     # noinspection PyUnusedLocal
     def _set_motion_timeout(self, entity, attribute, old, new, kwargs):
-        self.motion_light_timeout = int(round(float(new)))
-        self.log('Se establece nuevo timeout para MotionLights: {} segs'.format(self.motion_light_timeout))
+        self._motion_light_timeout = int(round(float(new)))
+        self.log('Se establece nuevo timeout para MotionLights: {} segs'.format(self._motion_light_timeout))
 
     # noinspection PyUnusedLocal
     def _light_motion_state(self, entity, attribute, old, new, kwargs):
         # self.log('New state light {}, old={}, new={}'.format(entity, old, new))
-        self.lights_motion_active[entity] = new == 'on'
+        self._lights_motion_active[entity] = new == 'on'
 
     # noinspection PyUnusedLocal
     def turn_on_motion_lights(self, entity, attribute, old, new, kwargs):
         """Method for turning on the motion-controlled lights."""
-        if (not self.motion_lights_running and not any(self.lights_motion_active.values()) and
-                self.extra_condition and not self.media_player_active):
-            self.motion_lights_running = True
+        if (not self._motion_lights_running and not any(self._lights_motion_active.values()) and
+                self._extra_condition and not self._media_player_active):
+            self._motion_lights_running = True
             self.log('TURN_ON MOTION_LIGHTS ({}), with timeout: {} sec'
-                     .format(self.lights_motion, self.motion_light_timeout), LOG_LEVEL)
-            self.call_service("light/turn_on", entity_id=self.lights_motion,
+                     .format(self._lights_motion, self._motion_light_timeout), LOG_LEVEL)
+            self.call_service("light/turn_on", entity_id=self._lights_motion,
                               color_temp=300, brightness=200, transition=0)
-            if self.handle_motion_off is not None:
-                self.log('Cancelling {}'.format(self.handle_motion_off))
-                self.cancel_listen_state(self.handle_motion_off)
-            self.handle_motion_off = self.listen_state(self.turn_off_motion_lights, self.pir,
-                                                       new="off", duration=self.motion_light_timeout)
+            if self._handle_motion_off is not None:
+                self.log('Cancelling {}'.format(self._handle_motion_off))
+                self.cancel_listen_state(self._handle_motion_off)
+            self._handle_motion_off = self.listen_state(self.turn_off_motion_lights, self._pir,
+                                                        new="off", duration=self._motion_light_timeout)
 
     # noinspection PyUnusedLocal
     def turn_off_motion_lights(self, entity, attribute, old, new, kwargs):
         """Method for turning off the motion-controlled lights after some time without any movement."""
-        if self.motion_lights_running and self.extra_condition and not self.media_player_active:
-            self.log('EN TURN_OFF MOTION_LIGHTS, other lights={}'
-                     .format([self.get_state(l) for l in self.other_lights_room]), LOG_LEVEL)
-            if all([self.get_state(l) == 'off' for l in self.other_lights_room]):
+        if self._motion_lights_running and self._extra_condition and not self._media_player_active:
+            if all([(self.get_state(l) == 'off') or (self.get_state(l) is None) for l in self._other_lights_room]):
                 self.log('TURNING_OFF MOTION_LIGHTS, id={}, old={}, new={}'.format(entity, old, new), LOG_LEVEL)
-                self.call_service("light/turn_off", entity_id=self.lights_motion, transition=1)
-            self.cancel_listen_state(self.handle_motion_off)
-            self.handle_motion_off = None
-        self.motion_lights_running = False
+                self.call_service("light/turn_off", entity_id=self._lights_motion, transition=1)
+            else:
+                self.log('NO TURN_OFF MOTION_LIGHTS (other lights in the room are ON={})'
+                         .format([self.get_state(l) for l in self._other_lights_room]), LOG_LEVEL)
+            self.cancel_listen_state(self._handle_motion_off)
+            self._handle_motion_off = None
+        self._motion_lights_running = False

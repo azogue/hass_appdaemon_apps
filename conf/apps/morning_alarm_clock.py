@@ -13,18 +13,20 @@ which has to run a specific Kodi Add-On: plugin.audio.lacafetera.
 """
 import appdaemon.appapi as appapi
 import datetime as dt
+from dateutil.parser import parse
 from functools import reduce
 import json
-import pandas as pd
+import pytz
 import requests
 
-# Defaults para La Cafetera:
+
+# Defaults para La Cafetera Alarm Clock:
 DEFAULT_DURATION = 1  # h
 DEFAULT_EMISION_TIME = "08:30:00"
-MAX_WAIT_TIME = pd.Timedelta(minutes=15)
+MAX_WAIT_TIME = dt.timedelta(minutes=15)
 STEP_RETRYING_SEC = 15
-WARM_UP_TIME_DELTA = pd.Timedelta(seconds=35)
-MIN_INTERVAL_BETWEEN_EPS = pd.Timedelta(hours=6)
+WARM_UP_TIME_DELTA = dt.timedelta(seconds=35)
+MIN_INTERVAL_BETWEEN_EPS = dt.timedelta(hours=6)
 
 
 # LOG_LEVEL = 'DEBUG'
@@ -42,7 +44,7 @@ def get_info_last_ep(tz, limit=1):
         data = r.json()
         if ('response' in data) and ('items' in data['response']):
             episode = data['response']['items'][-1]
-            published = pd.Timestamp(episode['published_at'], tz='UTC').tz_convert(tz)
+            published = parse(episode['published_at']).replace(tzinfo=pytz.UTC).astimezone(tz).replace(tzinfo=None)
             is_live = episode['type'] == 'LIVE'
             duration = dt.timedelta(hours=DEFAULT_DURATION)
             if not is_live:
@@ -52,25 +54,18 @@ def get_info_last_ep(tz, limit=1):
     return False, None
 
 
-def is_last_episode_ready_for_play(tz, debug_delta_now=None, debug_limit_eps=None):
+def is_last_episode_ready_for_play(now, tz):
     """Comprueba si hay un nuevo episodio disponible de La Cafetera.
 
+    :param now: appdaemon datetime.now()
     :param tz: timezone, para corregir las fechas en UTC a local
-    :param debug_delta_now: opcional, para debug. Aplica un ∆T a la hora actual
-    :param debug_limit_eps: opcional, para debug. Aplica un ∆N a la lista de episodios disponibles
     :return: (play_now, info_last_episode)
     :rtype: tuple(bool, dict)
     """
-    now = pd.Timestamp.now(tz=tz)
-    if debug_delta_now is not None:
-        now += pd.Timedelta(debug_delta_now)
-        print('DEBUG: work with now={}'.format(now))
-    estimated_today_ep = pd.Timestamp('{} {}'.format(now.date(), DEFAULT_EMISION_TIME), tz=tz)
-    limit = 1 if debug_limit_eps is None else debug_limit_eps
-    ok, info = get_info_last_ep(tz, limit)
+    est_today = dt.datetime.combine(now.date(), parse(DEFAULT_EMISION_TIME).time())  # .replace(tzinfo=tz)
+    ok, info = get_info_last_ep(tz, 1)
     if ok:
-        if (info['is_live'] or (now - info['published'] < MIN_INTERVAL_BETWEEN_EPS) or
-                (now > estimated_today_ep + MAX_WAIT_TIME)):
+        if info['is_live'] or (now - info['published'] < MIN_INTERVAL_BETWEEN_EPS) or (now > est_today + MAX_WAIT_TIME):
             # Reproducir YA
             return True, info
         else:
@@ -84,12 +79,11 @@ def make_notification_episode(ep_info):
     """Crea los datos para la notificación de alarma, con información del episodio de La Cafetera a reproducir."""
     message = ("La Cafetera [{}]: {}\n(Publicado: {})"
                .format(ep_info['episode']['title'], 'LIVE' if ep_info['is_live'] else 'RECORDED', ep_info['published']))
+    img_url = ep_info['episode']['image_url']
     data_msg = {"title": "Comienza el día en positivo!",
                 "message": message,
-                "data": {"push": {"badge": 0, "sound": "US-EN-Morgan-Freeman-Good-Morning.wav", "category": "ALARM"}}}
-    # TODO corregir img-attachment en ios notification
-    # img_url = ep_info['episode']['image_url']
-    # "data": {"attachment": img_url, "content-type": "jpg", "hide-thumbnail": "false"}}
+                "data": {"push": {"badge": 0, "sound": "US-EN-Morgan-Freeman-Good-Morning.wav", "category": "ALARM"},
+                         "attachment": {"url": img_url}}}
     return data_msg
 
 
@@ -126,14 +120,14 @@ class AlarmClock(appapi.AppDaemon):
     def initialize(self):
         """AppDaemon required method for app init."""
         conf_data = dict(self.config['AppDaemon'])
-        self.tz = conf_data.get('time_zone', 'Europe/Madrid')
+        self.tz = pytz.timezone(conf_data.get('time_zone', 'Europe/Madrid'))
         self.alarm_time_sensor = self.args.get('alarm_time')
         self.listen_state(self.alarm_time_change, self.alarm_time_sensor)
         self.weekdays_alarm = [_weekday(d) for d in self.args.get('alarmdays', 'mon,tue,wed,thu,fri').split(',')
                                if _weekday(d) >= 0]
 
         self.lights_alarm = self.args.get('lights_alarm', None)
-        self.notifier = self.args.get('notifier', None)
+        self.notifier = conf_data.get('notifier', None)
         total_duration = int(self.args.get('sunrise_duration', 60))
         if not self.phases_sunrise:
             self.phases_sunrise.append({'brightness': 4, 'xy_color': [0.6051, 0.282], 'rgb_color': (62, 16, 17)})
@@ -145,34 +139,23 @@ class AlarmClock(appapi.AppDaemon):
             self.phases_sunrise.append({'brightness': 254, 'xy_color': [0.449, 0.4078], 'rgb_color': (255, 203, 124)})
         self.transit_time = total_duration // len(self.phases_sunrise) + 1
 
-        self.kodi_ip = self.args.get('kodi_ip', '127.0.0.1')
-        self.kodi_port = self.args.get('kodi_port', 8080)
-        self.kodi_user = self.args.get('kodi_user', None)
-        self.kodi_pass = self.args.get('kodi_pass', None)
+        self.kodi_ip = conf_data.get('kodi_ip', '127.0.0.1')
+        self.kodi_port = conf_data.get('kodi_port', 8080)
+        self.kodi_user = conf_data.get('kodi_user', None)
+        self.kodi_pass = conf_data.get('kodi_pass', None)
 
-        self._set_dt_next_trigger()
-        self.run_hourly(self._check_alarm_day, None)
-        # self.log('INIT WITH NEXT ALARM IN: {:%d-%m-%Y %H:%M:%S}'.format(self.next_alarm), LOG_LEVEL)
-        # self.listen_state(self.turn_on_lights_as_sunrise, 'input_boolean.testing_alarm', new='on')
+        self._set_new_alarm_time()
+        self.log('INIT WITH NEXT ALARM IN: {:%d-%m-%Y %H:%M:%S}'.format(self.next_alarm), LOG_LEVEL)
+        self.listen_state(self.turn_on_lights_as_sunrise, 'input_boolean.testing_alarm', new='on')
 
     # noinspection PyUnusedLocal
     def alarm_time_change(self, entity, attribute, old, new, kwargs):
         """Re-schedule next alarm when alarm time sliders change."""
-        self._set_dt_next_trigger()
+        self._set_new_alarm_time()
         self.log('CHANGING ALARM TIME TO: {:%H:%M:%S}'.format(self.next_alarm), LOG_LEVEL)
 
     # noinspection PyUnusedLocal
-    def _check_alarm_day(self, *args):
-        now = self.datetime()
-        if self.next_alarm + WARM_UP_TIME_DELTA < now:  # - dt.timedelta(minutes=1):
-            next_day = self.next_alarm + dt.timedelta(days=1)
-            while next_day.weekday() not in self.weekdays_alarm:
-                next_day += dt.timedelta(days=1)
-            self.log('DEBUG: change day in check_alarm_day. From {} to {}'.format(self.next_alarm, next_day), LOG_LEVEL)
-            self.next_alarm = next_day
-
-    # noinspection PyUnusedLocal
-    def _set_dt_next_trigger(self, *args):
+    def _set_new_alarm_time(self, *args):
         if self.handle_alarm is not None:
             self.log('Cancelling timer "{}" -> {}'.format(self.handle_alarm, self.next_alarm), LOG_LEVEL)
             self.cancel_timer(self.handle_alarm)
@@ -180,8 +163,7 @@ class AlarmClock(appapi.AppDaemon):
                             zip(self.get_state(self.alarm_time_sensor).split(':'), ['hour', 'minute', 'second']),
                             self.datetime().replace(second=0, microsecond=0))
         self.next_alarm = time_alarm - WARM_UP_TIME_DELTA
-        self._check_alarm_day()
-        self.handle_alarm = self.run_at(self.run_alarm, self.next_alarm)
+        self.handle_alarm = self.run_daily(self.run_alarm, self.next_alarm.time())
         self.log('Creating timer for {} --> {}'.format(self.next_alarm, self.handle_alarm), LOG_LEVEL)
 
     # noinspection PyUnusedLocal
@@ -194,9 +176,8 @@ class AlarmClock(appapi.AppDaemon):
             self.call_service('light/turn_on', **args_runin[0])
 
         self.log('RUN_SUNRISE')
-        self.call_service('light/turn_off', entity_id=self.lights_alarm, transition=0,
-                          xy_color=self.phases_sunrise[0]['xy_color'], brightness=1)
-        self.call_service('light/turn_on', entity_id=self.lights_alarm, transition=0,
+        self.call_service('light/turn_off', entity_id=self.lights_alarm, transition=0)
+        self.call_service('light/turn_on', entity_id=self.lights_alarm, transition=1,
                           xy_color=self.phases_sunrise[0]['xy_color'], brightness=1)
         run_in = 2
         for phase in self.phases_sunrise:
@@ -233,8 +214,8 @@ class AlarmClock(appapi.AppDaemon):
         # Wake device
         self.run_kodi_addon_lacafetera(mode='wakeup')
         # Check if alarm is ready to launch
-        alarm_ready, alarm_info = is_last_episode_ready_for_play(self.tz)
-        self.log('is_alarm_ready_to_trigger? {}, info={}'.format(alarm_ready, alarm_info), LOG_LEVEL)
+        alarm_ready, alarm_info = is_last_episode_ready_for_play(self.datetime(), self.tz)
+        # self.log('is_alarm_ready_to_trigger? {}, info={}'.format(alarm_ready, alarm_info), LOG_LEVEL)
         if alarm_ready:
             self.turn_on_lights_as_sunrise()
             self.run_kodi_addon_lacafetera(mode='playlast')
@@ -247,8 +228,11 @@ class AlarmClock(appapi.AppDaemon):
     # noinspection PyUnusedLocal
     def run_alarm(self, *args):
         """Run the alarm main secuence: prepare, trigger & schedule next"""
-        self.prepare_context_alarm()
-        self.run_in(self.trigger_service_in_alarm, WARM_UP_TIME_DELTA.total_seconds())
-        # Resetting
-        self.run_in(self._set_dt_next_trigger, 10 * WARM_UP_TIME_DELTA.total_seconds())
+        if self.datetime().weekday() in self.weekdays_alarm:
+            self.prepare_context_alarm()
+            self.run_in(self.trigger_service_in_alarm, WARM_UP_TIME_DELTA.total_seconds())
+        else:
+            self.log('ALARM CLOCK NOT TRIGGERED TODAY (weekday={}, alarm weekdays={})'
+                     .format(self.datetime().weekday(), self.weekdays_alarm))
+
 

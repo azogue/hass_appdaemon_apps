@@ -110,24 +110,26 @@ class EnerpiPeakNotifier(appapi.AppDaemon):
         # App user inputs
         self._slider_upper_limit = self.args.get('max_power_kw', '')
         self._slider_lower_limit = self.args.get('max_power_kw_reset', '')
+        self._upper_limit = DEFAULT_UPPER_LIMIT_KW * 1000
+        self._lower_limit = DEFAULT_LOWER_LIMIT_KW * 1000
         if self._slider_upper_limit:
             try:
                 self._upper_limit = int(1000 * float(self._slider_upper_limit))
             except ValueError:
-                self._upper_limit = int(1000 * float(self.get_state(self._slider_upper_limit)))
-                self.listen_state(self._slider_limit_change, self._slider_upper_limit)
-        else:
-            self._upper_limit = DEFAULT_UPPER_LIMIT_KW * 1000
+                state = self.get_state(self._slider_lower_limit)
+                if state:
+                    self._upper_limit = int(1000 * float(self.get_state(self._slider_upper_limit)))
+                    self.listen_state(self._slider_limit_change, self._slider_upper_limit)
         if self._slider_lower_limit:
             try:
                 self._lower_limit = int(1000 * float(self._slider_lower_limit))
             except ValueError:
-                self._lower_limit = int(1000 * float(self.get_state(self._slider_lower_limit)))
-                self.listen_state(self._slider_limit_change, self._slider_lower_limit)
+                state = self.get_state(self._slider_lower_limit)
+                if state:
+                    self._lower_limit = int(1000 * float(self.get_state(self._slider_lower_limit)))
+                    self.listen_state(self._slider_limit_change, self._slider_lower_limit)
         elif self._slider_upper_limit:
             self._lower_limit = self._upper_limit // 2
-        else:
-            self._lower_limit = DEFAULT_LOWER_LIMIT_KW * 1000
 
         # Listen for Main Power changes:
         self.listen_state(self._main_power_change, self._main_power)

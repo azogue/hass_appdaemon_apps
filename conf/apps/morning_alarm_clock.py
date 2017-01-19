@@ -146,7 +146,6 @@ class AlarmClock(appapi.AppDaemon):
 
         self._set_new_alarm_time()
         self.log('INIT WITH NEXT ALARM IN: {:%d-%m-%Y %H:%M:%S}'.format(self.next_alarm), LOG_LEVEL)
-        self.listen_state(self.turn_on_lights_as_sunrise, 'input_boolean.testing_alarm', new='on')
 
     # noinspection PyUnusedLocal
     def alarm_time_change(self, entity, attribute, old, new, kwargs):
@@ -222,7 +221,7 @@ class AlarmClock(appapi.AppDaemon):
             # Notification:
             self.call_service(self.notifier.replace('.', '/'), **make_notification_episode(alarm_info))
         else:
-            self.log('POSTPONE ALARM, alarm_info={}'.format(alarm_info), LOG_LEVEL)
+            self.log('POSTPONE ALARM', LOG_LEVEL)
             self.run_in(self.trigger_service_in_alarm, STEP_RETRYING_SEC)
 
     # noinspection PyUnusedLocal

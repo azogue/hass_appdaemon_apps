@@ -29,7 +29,6 @@ WARM_UP_TIME_DELTA = dt.timedelta(seconds=35)
 MIN_INTERVAL_BETWEEN_EPS = dt.timedelta(hours=6)
 
 
-# LOG_LEVEL = 'DEBUG'
 LOG_LEVEL = 'INFO'
 WEEKDAYS_DICT = {'mon': 0, 'tue': 1, 'wed': 2, 'thu': 3, 'fri': 4, 'sat': 5, 'sun': 6}
 
@@ -65,7 +64,7 @@ def is_last_episode_ready_for_play(now, tz):
     est_today = dt.datetime.combine(now.date(), parse(DEFAULT_EMISION_TIME).time())  # .replace(tzinfo=tz)
     ok, info = get_info_last_ep(tz, 1)
     if ok:
-        if info['is_live'] or (now - info['published'] < MIN_INTERVAL_BETWEEN_EPS) or (now > est_today + MAX_WAIT_TIME):
+        if info['is_live'] or (now - info['published'] < MIN_INTERVAL_BETWEEN_EPS) or (now + MAX_WAIT_TIME < est_today):
             # Reproducir YA
             return True, info
         else:
@@ -170,8 +169,8 @@ class AlarmClock(appapi.AppDaemon):
         """Turn on the lights with a sunrise simulation done with multiple transitions."""
 
         def _set_sunrise_phase(*args_runin):
-            self.log('SET_SUNRISE_PHASE: XY={xy_color}, BRIGHT={brightness}, TRANSITION={transition}'
-                     .format(**args_runin[0]))
+            # self.log('SET_SUNRISE_PHASE: XY={xy_color}, BRIGHT={brightness}, TRANSITION={transition}'
+            #          .format(**args_runin[0]))
             self.call_service('light/turn_on', **args_runin[0])
 
         self.log('RUN_SUNRISE')
@@ -211,7 +210,7 @@ class AlarmClock(appapi.AppDaemon):
     def trigger_service_in_alarm(self, *args):
         """Launch alarm secuence if ready, or set itself to retry in the short future."""
         # Wake device
-        self.run_kodi_addon_lacafetera(mode='wakeup')
+        # self.run_kodi_addon_lacafetera(mode='wakeup')
         # Check if alarm is ready to launch
         alarm_ready, alarm_info = is_last_episode_ready_for_play(self.datetime(), self.tz)
         # self.log('is_alarm_ready_to_trigger? {}, info={}'.format(alarm_ready, alarm_info), LOG_LEVEL)

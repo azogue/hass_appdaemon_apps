@@ -17,9 +17,6 @@ import appdaemon.homeassistant as ha
 
 
 LOG_LEVEL = 'DEBUG'
-MAX_BRIGHTNESS_KODI = 75
-
-
 PARAMS_GET_ITEM = {"id": 1, "jsonrpc": "2.0", "method": "Player.GetItem",
                    "params": {"playerid": 1,
                               "properties": ["title", "artist", "albumartist", "genre", "year", "rating", "album",
@@ -29,6 +26,16 @@ PARAMS_GET_ITEM = {"id": 1, "jsonrpc": "2.0", "method": "Player.GetItem",
                                              "lastplayed", "firstaired", "season", "episode", "showtitle", "thumbnail",
                                              "file", "tvshowid", "watchedepisodes", "art", "description", "theme",
                                              "dateadded", "runtime", "starttime", "endtime"]}}
+
+
+def _get_max_brightness_ambient_lights():
+    if ha.now_is_between('09:00', '19:00'):
+        return 200
+    elif ha.now_is_between('19:00', '22:00'):
+        return 150
+    elif ha.now_is_between('22:00', '04:00'):
+        return 75
+    return 25
 
 
 # noinspection PyClassHasNoInit
@@ -43,6 +50,8 @@ class KodiAssistant(appapi.AppDaemon):
     _kodi_port = None
     _kodi_user = None
     _kodi_pass = None
+    _kodi_url = None
+    _kodi_auth = None
 
     _notifier = None
 
@@ -59,25 +68,21 @@ class KodiAssistant(appapi.AppDaemon):
         conf_data = dict(self.config['AppDaemon'])
         self._media_player = conf_data.get('media_player', None)
         self._notifier = conf_data.get('notifier', None)
-        self._kodi_ip = conf_data.get('kodi_ip', '127.0.0.1')
-        self._kodi_port = conf_data.get('kodi_port', 8080)
-        self._kodi_user = conf_data.get('kodi_user', None)
-        self._kodi_pass = conf_data.get('kodi_pass', None)
+
+        _kodi_user = conf_data.get('kodi_user', None)
+        _kodi_pass = conf_data.get('kodi_pass', None)
+        self._kodi_url = 'http://{}:{}/jsonrpc'.format(conf_data.get('kodi_ip', '127.0.0.1'),
+                                                       conf_data.get('kodi_port', 8080))
+        self._kodi_auth = (_kodi_user, _kodi_pass) if _kodi_user is not None else None
 
         # Listen for Kodi changes:
         self.listen_state(self.kodi_state, self._media_player)
         self.log('KodiAssist Initialized with dim_lights={}, off_lights={}'.format(self._lights_dim, self._lights_off))
 
-    def _urlbase_and_auth(self):
-        url_base = 'http://{}:{}/'.format(self._kodi_ip, self._kodi_port)
-        auth = (self._kodi_user, self._kodi_pass) if self._kodi_user is not None else None
-        return url_base, auth
-
     def kodi_is_playing_video(self):
         """Return True if kodi is playing video, False in any other case."""
-        url_base, auth = self._urlbase_and_auth()
         data = {"request": json.dumps({"id": 1, "jsonrpc": "2.0", "method": "Player.GetActivePlayers"})}
-        r = requests.get(url_base + 'jsonrpc', params=data, auth=auth,
+        r = requests.get(self._kodi_url, params=data, auth=self._kodi_auth,
                          headers={'Content-Type': 'application/json'}, timeout=5)
         if r.ok:
             res = r.json()
@@ -89,13 +94,17 @@ class KodiAssistant(appapi.AppDaemon):
 
     def get_current_playing_item(self):
         """When kodi is playing something, retrieves its info."""
-        url_base, auth = self._urlbase_and_auth()
         data_getitem = {"request": json.dumps(PARAMS_GET_ITEM)}
-        ri = requests.get(url_base + 'jsonrpc', params=data_getitem, auth=auth,
+        ri = requests.get(self._kodi_url, params=data_getitem, auth=self._kodi_auth,
                           headers={'Content-Type': 'application/json'}, timeout=5)
         if ri.ok:
-            item = ri.json()['result']['item']
-            return item
+            item = ri.json()
+            try:
+                return item['result']['item']
+            except KeyError:
+                self.error('No [result][item] in response to get_current_playing_item -> RESP:{}'
+                           .format(ri.content), 'ERROR')
+                return None
         else:
             self.log('No current playing item? -> {}'.format(ri.content), 'WARNING')
             return None
@@ -111,20 +120,24 @@ class KodiAssistant(appapi.AppDaemon):
                 title += " [{}]".format(item['year'])
             message = "{}\n∆T:{:.2f}h.".format(item['plot'], item['runtime'] / 3600)
             try:
-                if 'poster' in item['art']:
-                    k = 'poster'
+                if 'thumbnail' in item:
+                    raw_img_url = item['thumbnail']
+                elif 'thumb' in item:
+                    raw_img_url = item['thumb']
+                elif 'poster' in item['art']:
+                    raw_img_url = item['art']['poster']
                 elif 'season.poster' in item['art']:
-                    k = 'season.poster'
+                    raw_img_url = item['art']['season.poster']
                 else:
                     self.log('No poster in item[art]={}'.format(item['art']))
                     k = list(item['art'].keys())[0]
-                img_url = parse.unquote_plus(item['art'][k]).rstrip('/').lstrip('image://')
-                data_msg = {"title": title, "message": message,
-                            "data": {"attachment": {"url": img_url.replace('http://', 'https://')}}}
-                                     # "content-type": "jpg", "hide-thumbnail": "false"}}
+                    raw_img_url = item['art'][k]
+                img_url = parse.unquote_plus(raw_img_url).rstrip('/').lstrip('image://')
+                data_msg = {"title": title, "message": message, "data": {"attachment": {"url": img_url}}}
                 self.log('iOS MESSAGE: {}'.format(data_msg))
             except KeyError:
                 data_msg = {"title": title, "message": message}
+        self.log(data_msg, level='DEBUG')
         return data_msg
 
     def _adjust_kodi_lights(self, play=True):
@@ -134,16 +147,20 @@ class KodiAssistant(appapi.AppDaemon):
                 attrs_light = self.get_state(light_id, attribute='attributes')
                 attrs_light.update({"state": light_state})
                 self._light_states[light_id] = attrs_light
+                max_brightness = _get_max_brightness_ambient_lights()
                 if light_id in self._lights_off:
                     self.log('Apagando light {} para KODI PLAY'.format(light_id), LOG_LEVEL)
                     self.call_service("light/turn_off", entity_id=light_id, transition=2)
-                elif ("brightness" in attrs_light.keys()) and (attrs_light["brightness"] > MAX_BRIGHTNESS_KODI):
+                elif ("brightness" in attrs_light.keys()) and (attrs_light["brightness"] > max_brightness):
                     self.log('Atenuando light {} para KODI PLAY'.format(light_id), LOG_LEVEL)
-                    self.call_service("light/turn_on", entity_id=light_id, transition=2, brightness=MAX_BRIGHTNESS_KODI)
-                else:
-                    self.log('WTF light: {} -> {}'.format(light_id, attrs_light), 'ERROR')
+                    self.call_service("light/turn_on", entity_id=light_id, transition=2, brightness=max_brightness)
+                # else:
+                #     self.log('Light already OFF: {} -> {}'.format(light_id, attrs_light), 'ERROR')
             else:
+                # try:
                 state_before = self._light_states[light_id]
+                # except KeyError:
+                #     state_before = self._light_states[light_id]
                 if ('state' in state_before) and (state_before['state'] == 'on'):
                     try:
                         new_state_attrs = {"xy_color": state_before["xy_color"],

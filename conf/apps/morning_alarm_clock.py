@@ -64,7 +64,8 @@ def is_last_episode_ready_for_play(now, tz):
     est_today = dt.datetime.combine(now.date(), parse(DEFAULT_EMISION_TIME).time())  # .replace(tzinfo=tz)
     ok, info = get_info_last_ep(tz, 1)
     if ok:
-        if info['is_live'] or (now - info['published'] < MIN_INTERVAL_BETWEEN_EPS) or (now + MAX_WAIT_TIME < est_today):
+        if (info['is_live'] or (now - info['published'] < MIN_INTERVAL_BETWEEN_EPS) or
+                (now + MAX_WAIT_TIME < est_today) or (now - MAX_WAIT_TIME > est_today)):
             # Reproducir YA
             return True, info
         else:

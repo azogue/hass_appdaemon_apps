@@ -29,11 +29,11 @@ PARAMS_GET_ITEM = {"id": 1, "jsonrpc": "2.0", "method": "Player.GetItem",
 
 
 def _get_max_brightness_ambient_lights():
-    if ha.now_is_between('09:00', '19:00'):
+    if ha.now_is_between('09:00:00', '19:00:00'):
         return 200
-    elif ha.now_is_between('19:00', '22:00'):
+    elif ha.now_is_between('19:00:00', '22:00:00'):
         return 150
-    elif ha.now_is_between('22:00', '04:00'):
+    elif ha.now_is_between('22:00:00', '04:00:00'):
         return 75
     return 25
 
@@ -110,6 +110,7 @@ class KodiAssistant(appapi.AppDaemon):
             return None
 
     def _make_ios_message(self, state, item=None):
+        # TODO repair image attachment in iOS Notify
         if item is None:
             title = "KODI state"
             message = "New state is *{}*".format(state)
@@ -133,8 +134,9 @@ class KodiAssistant(appapi.AppDaemon):
                     k = list(item['art'].keys())[0]
                     raw_img_url = item['art'][k]
                 img_url = parse.unquote_plus(raw_img_url).rstrip('/').lstrip('image://')
-                data_msg = {"title": title, "message": message, "data": {"attachment": {"url": img_url}}}
-                self.log('iOS MESSAGE: {}'.format(data_msg))
+                data_msg = {"title": title, "message": message,
+                            "data": {"attachment": {"url": img_url.replace('http:', 'https:')}}}
+                self.log('iOS MESSAGE: {}; item={}'.format(data_msg, item))
             except KeyError:
                 data_msg = {"title": title, "message": message}
         self.log(data_msg, level='DEBUG')
@@ -157,10 +159,11 @@ class KodiAssistant(appapi.AppDaemon):
                 # else:
                 #     self.log('Light already OFF: {} -> {}'.format(light_id, attrs_light), 'ERROR')
             else:
-                # try:
-                state_before = self._light_states[light_id]
-                # except KeyError:
-                #     state_before = self._light_states[light_id]
+                try:
+                    state_before = self._light_states[light_id]
+                except KeyError as e:
+                    self.error('{} --> light_states: {}'.format(e, self._light_states), level='ERROR')
+                    state_before = {}
                 if ('state' in state_before) and (state_before['state'] == 'on'):
                     try:
                         new_state_attrs = {"xy_color": state_before["xy_color"],
@@ -177,7 +180,7 @@ class KodiAssistant(appapi.AppDaemon):
     # noinspection PyUnusedLocal
     def kodi_state(self, entity, attribute, old, new, kwargs):
         """Kodi state change main control."""
-        if new == 'playing':
+        if (old == 'idle') and (new == 'playing'):
             self._is_playing_video = self.kodi_is_playing_video()
             self.log('KODI START. old:{}, new:{}, is_playing_video={}'
                      .format(old, new, self._is_playing_video), LOG_LEVEL)
@@ -191,15 +194,15 @@ class KodiAssistant(appapi.AppDaemon):
                 now = ha.get_now()
                 if (self._last_play is None) or (now - self._last_play > dt.timedelta(minutes=1)):
                     self._last_play = now
-                    if new_video and (self._notifier is not None):  # Notify
+                    if new_video and (self._notifier is not None):
+                        # iOS Notification
                         self.call_service(self._notifier.replace('.', '/'),
                                           **self._make_ios_message(new, item=self._item_playing))
 
                 self._adjust_kodi_lights(play=True)
-        elif (old == 'playing') and self._is_playing_video:
+        elif (old == 'playing') and (new == 'idle') and self._is_playing_video:
             self._is_playing_video = False
             self._last_play = ha.get_now()
             self.log('KODI STOP. old:{}, new:{}, type_lp={}'.format(old, new, type(self._last_play)), LOG_LEVEL)
-            # self.call_service('notify/ios_iphone', **self._make_ios_message(new))
             self._item_playing = None
             self._adjust_kodi_lights(play=False)

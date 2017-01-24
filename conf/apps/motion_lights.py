@@ -10,7 +10,7 @@ or there aren't any more lights in 'on' state in the room.
 import appdaemon.appapi as appapi
 
 
-LOG_LEVEL = 'DEBUG'
+LOG_LEVEL = 'INFO'
 
 
 # noinspection PyClassHasNoInit
@@ -118,7 +118,7 @@ class MotionLights(appapi.AppDaemon):
 
     # noinspection PyUnusedLocal
     def _light_motion_state(self, entity, attribute, old, new, kwargs):
-        self.log('New state light {}, old={}, new={}, kwargs'.format(entity, old, new, kwargs), level=LOG_LEVEL)
+        # self.log('New state light {}, old={}, new={}, kwargs'.format(entity, old, new, kwargs), level=LOG_LEVEL)
         self._lights_motion_active[entity] = new == 'on'
 
     # noinspection PyUnusedLocal

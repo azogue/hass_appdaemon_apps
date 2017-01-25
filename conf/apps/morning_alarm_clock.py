@@ -12,6 +12,7 @@ which has to run a specific Kodi Add-On: plugin.audio.lacafetera.
 
 """
 import appdaemon.appapi as appapi
+import appdaemon.conf as conf
 import datetime as dt
 from dateutil.parser import parse
 from functools import reduce
@@ -19,15 +20,6 @@ import json
 import pytz
 import requests
 
-
-'''
-{% for state in states.media_player %}
-** {{state.entity_id}} **
-"{{ state.name }}" is "{{state.state}}"
-{%- for k in state.attributes %}
-    * {{k}} --> {{state.attributes[k]}}{% endfor %}
-{% endfor %}
-'''
 
 # Defaults para La Cafetera Alarm Clock:
 DEFAULT_DURATION = 1  # h
@@ -139,7 +131,7 @@ class AlarmClock(appapi.AppDaemon):
     def initialize(self):
         """AppDaemon required method for app init."""
         conf_data = dict(self.config['AppDaemon'])
-        self._tz = pytz.timezone(conf_data.get('time_zone', 'Europe/Madrid'))
+        self._tz = conf.tz
         self._alarm_time_sensor = self.args.get('alarm_time')
         self.listen_state(self.alarm_time_change, self._alarm_time_sensor)
         self._weekdays_alarm = [_weekday(d) for d in self.args.get('alarmdays', 'mon,tue,wed,thu,fri').split(',')
@@ -160,7 +152,7 @@ class AlarmClock(appapi.AppDaemon):
         self._kodi_pass = conf_data.get('kodi_pass', None)
 
         self._media_player_mopidy = conf_data.get('media_player_mopidy')
-        self._mopidy_ip = '192.168.1.52'
+        self._mopidy_ip = '192.168.1.51'
         self._mopidy_port = 6680
 
         # Trigger for last episode and boolean for play status
@@ -196,18 +188,27 @@ class AlarmClock(appapi.AppDaemon):
         self._selected_player = new
 
     # noinspection PyUnusedLocal
-    def turn_off_manual_trigger(self, *args):
+    def turn_off_alarm_clock(self, *args):
         """Stop current play when turning off the input_boolean."""
-        # self.log('In TURN_OFF_MANUAL_TRIGGER. Player: {}'.format(self._selected_player))
         if self.play_in_kodi and (self.get_state(entity_id=self._media_player_kodi) == 'playing'):
             self.call_service('media_player/media_stop', entity_id=self._media_player_kodi)
             self.call_service('switch/turn_off', entity_id='switch.kodi_tv_salon')
+            if self._manual_trigger is not None:
+                self._last_trigger = dt.datetime.now()
+                self.set_state(entity_id=self._manual_trigger, state='off')
             self.log('TURN_OFF KODI')
         elif not self.play_in_kodi and (self.get_state(entity_id=self._media_player_mopidy) == 'playing'):
             # self.call_service('media_player/media_stop', entity_id=self._media_player_mopidy) # NotImplemented!
             self.call_service('media_player/turn_off', entity_id=self._media_player_mopidy)
             self.call_service('switch/turn_off', entity_id="switch.altavoz")
+            if self._manual_trigger is not None:
+                self._last_trigger = dt.datetime.now()
+                self.set_state(entity_id=self._manual_trigger, state='off')
             self.log('TURN_OFF MOPIDY')
+        # else:
+        #     self.log('WTF? TURN_OFF: kodi={}, id_k={}, id_m={}, st_m={}'
+        #              .format(self.play_in_kodi, self._media_player_kodi, self._media_player_mopidy,
+        #                      self.get_state(entity_id=self._media_player_mopidy)))
 
     # noinspection PyUnusedLocal
     def manual_triggering(self, entity, attribute, old, new, kwargs):
@@ -225,11 +226,11 @@ class AlarmClock(appapi.AppDaemon):
             # Notification:
             self.call_service(self._notifier.replace('.', '/'), **make_notification_episode(ep_info))
         # Manual stop after at least 30 sec
-        if ((new == 'off') and (old == 'on') and (self._last_trigger is not None) and
+        elif ((new == 'off') and (old == 'on') and (self._last_trigger is not None) and
                 ((dt.datetime.now() - self._last_trigger).total_seconds() > 30)):
             # Stop if it's playing
             self.log('TRIGGER_STOP (last trigger at {})'.format(self._last_trigger))
-            self.turn_off_manual_trigger()
+            self.turn_off_alarm_clock()
 
     # noinspection PyUnusedLocal
     def alarm_time_change(self, entity, attribute, old, new, kwargs):
@@ -339,7 +340,7 @@ class AlarmClock(appapi.AppDaemon):
             self.set_state(self._manual_trigger, state='on')
             duration = alarm_info['duration'].total_seconds() if ('duration' in alarm_info) else DEFAULT_DURATION * 3600
             duration *= 1.1
-            self.run_in(self.turn_off_manual_trigger, int(duration))
+            self.run_in(self.turn_off_alarm_clock, int(duration))
             self.log('ALARM RUNNING NOW. AUTO STANDBY PROGRAMMED IN {:.0f} SECONDS'.format(duration), LOG_LEVEL)
         else:
             self.log('POSTPONE ALARM', LOG_LEVEL)

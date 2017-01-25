@@ -26,6 +26,8 @@ PARAMS_GET_ITEM = {"id": 1, "jsonrpc": "2.0", "method": "Player.GetItem",
                                              "lastplayed", "firstaired", "season", "episode", "showtitle", "thumbnail",
                                              "file", "tvshowid", "watchedepisodes", "art", "description", "theme",
                                              "dateadded", "runtime", "starttime", "endtime"]}}
+TYPE_ITEMS_NOTIFY = ['movie', 'episode']
+# TYPE_ITEMS_IGNORE = ['channel', 'unknown']  # grabaciones: 'unknown'
 
 
 def _get_max_brightness_ambient_lights():
@@ -47,9 +49,6 @@ class KodiAssistant(appapi.AppDaemon):
 
     _media_player = None
     _kodi_ip = None
-    _kodi_port = None
-    _kodi_user = None
-    _kodi_pass = None
     _kodi_url = None
     _kodi_auth = None
 
@@ -71,8 +70,8 @@ class KodiAssistant(appapi.AppDaemon):
 
         _kodi_user = conf_data.get('kodi_user', None)
         _kodi_pass = conf_data.get('kodi_pass', None)
-        self._kodi_url = 'http://{}:{}/jsonrpc'.format(conf_data.get('kodi_ip', '127.0.0.1'),
-                                                       conf_data.get('kodi_port', 8080))
+        self._kodi_ip = conf_data.get('kodi_ip', '127.0.0.1')
+        self._kodi_url = 'http://{}:{}/jsonrpc'.format(self._kodi_ip, conf_data.get('kodi_port', 8080))
         self._kodi_auth = (_kodi_user, _kodi_pass) if _kodi_user is not None else None
 
         # Listen for Kodi changes:
@@ -134,12 +133,15 @@ class KodiAssistant(appapi.AppDaemon):
                     k = list(item['art'].keys())[0]
                     raw_img_url = item['art'][k]
                 img_url = parse.unquote_plus(raw_img_url).rstrip('/').lstrip('image://')
+                if (self._kodi_ip not in img_url) and img_url.startswith('http://'):
+                    img_url = img_url.replace('http:', 'https:')
                 data_msg = {"title": title, "message": message,
-                            "data": {"attachment": {"url": img_url.replace('http:', 'https:')}}}
+                            "data": {"attachment": {"url": img_url}, "push": {"category": "KODIPLAY"}}}
                 self.log('iOS MESSAGE: {}; item={}'.format(data_msg, item))
-            except KeyError:
-                data_msg = {"title": title, "message": message}
-        self.log(data_msg, level='DEBUG')
+            except KeyError as e:
+                self.log('iOS MESSAGE KeyError: {}; item={}'.format(e, item))
+                data_msg = {"title": title, "message": message, "data": {"push": {"category": "KODIPLAY"}}}
+        self.log(data_msg)
         return data_msg
 
     def _adjust_kodi_lights(self, play=True):
@@ -190,16 +192,14 @@ class KodiAssistant(appapi.AppDaemon):
                 if (self._item_playing is not None) or (self._item_playing != item_playing):
                     self._item_playing = item_playing
                     new_video = True
-
                 now = ha.get_now()
-                if (self._last_play is None) or (now - self._last_play > dt.timedelta(minutes=1)):
+                if (self._last_play is None) or (now - self._last_play > dt.timedelta(seconds=30)):
                     self._last_play = now
-                    if new_video and (self._notifier is not None):
+                    if new_video and (self._notifier is not None) and (self._item_playing['type'] in TYPE_ITEMS_NOTIFY):
                         # iOS Notification
                         self.call_service(self._notifier.replace('.', '/'),
                                           **self._make_ios_message(new, item=self._item_playing))
-
-                self._adjust_kodi_lights(play=True)
+                        self._adjust_kodi_lights(play=True)
         elif (old == 'playing') and (new == 'idle') and self._is_playing_video:
             self._is_playing_video = False
             self._last_play = ha.get_now()

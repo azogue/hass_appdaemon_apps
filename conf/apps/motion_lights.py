@@ -81,7 +81,7 @@ class MotionLights(appapi.AppDaemon):
 
     # noinspection PyUnusedLocal
     def _media_player_state_ch(self, entity, attribute, old, new, kwargs):
-        self.log('media_player_state_ch change: {} from {} to {}'.format(entity, old, new), level=LOG_LEVEL)
+        # self.log('media_player_state_ch change: {} from {} to {}'.format(entity, old, new), level=LOG_LEVEL)
         self._media_player_active = new == 'playing'
 
     # noinspection PyUnusedLocal

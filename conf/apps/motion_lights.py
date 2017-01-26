@@ -112,36 +112,39 @@ class MotionLights(appapi.AppDaemon):
         elif any(filter(lambda x: x is False, self._lights_motion_active.values())):
             self.log('MOTION LIGHTS OFF (some lights were turn off manually) --> {}'.format(self._lights_motion_active))
             self._motion_lights_running = False
-        if set_listen_state or bkp != self._lights_motion_active:
+        if set_listen_state or (bkp != self._lights_motion_active):
             self.log('UPDATE light_motion_states from {} to {}'
                      .format(bkp, self._lights_motion_active, set_listen_state))
 
     # noinspection PyUnusedLocal
     def _light_motion_state(self, entity, attribute, old, new, kwargs):
-        # self.log('New state light {}, old={}, new={}, kwargs'.format(entity, old, new, kwargs), level=LOG_LEVEL)
         self._lights_motion_active[entity] = new == 'on'
+
+    def _lights_are_off(self, include_motion_lights=True):
+        other_lights_are_off = ((self._lights_check_off is None)
+                                or all([(self.get_state(l) == 'off') or (self.get_state(l) is None)
+                                        for l in self._lights_check_off]))
+        if include_motion_lights:
+            return other_lights_are_off and not any(self._lights_motion_active.values())
+        return other_lights_are_off
 
     # noinspection PyUnusedLocal
     def turn_on_motion_lights(self, entity, attribute, old, new, kwargs):
         """Method for turning on the motion-controlled lights."""
-        # self.log('DEBUG MOTION ON ({}) -> running={}, extra={}, media={}, {}'
-        #          .format(entity, self._motion_lights_running, self._extra_condition,
-        #                  self._media_player_active, self._lights_motion_active))
-        if (not self._motion_lights_running and not any(self._lights_motion_active.values()) and
+        if (not self._motion_lights_running and self._lights_are_off(include_motion_lights=True) and
                 self._extra_condition and not self._media_player_active):
             self._motion_lights_running = True
-            self.log('TURN_ON MOTION_LIGHTS ({}), with timeout: {} sec'
-                     .format(self._lights_motion, self._motion_light_timeout), LOG_LEVEL)
+            self.log('TURN_ON MOTION_LIGHTS ({}), with timeout: {} sec. lights_motion: {}'
+                     .format(self._lights_motion, self._motion_light_timeout, self._lights_motion_active.values()),
+                     LOG_LEVEL)
             self.call_service("light/turn_on", entity_id=self._lights_motion,
                               color_temp=300, brightness=200, transition=0)
 
     # noinspection PyUnusedLocal
     def turn_off_motion_lights(self, entity, attribute, old, new, kwargs):
         """Method for turning off the motion-controlled lights after some time without any movement."""
-        # self.log('DEBUG MOTION OFF ({})'.format(entity))
         if self._motion_lights_running and self._extra_condition and not self._media_player_active:
-            if (not self._lights_check_off or
-                    all([(self.get_state(l) == 'off') or (self.get_state(l) is None) for l in self._lights_check_off])):
+            if self._lights_are_off(include_motion_lights=False):
                 self.log('TURNING_OFF MOTION_LIGHTS, id={}, old={}, new={}'.format(entity, old, new), LOG_LEVEL)
                 self.call_service("light/turn_off", entity_id=self._lights_motion, transition=1)
             else:

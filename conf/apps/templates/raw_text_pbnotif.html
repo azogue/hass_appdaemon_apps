@@ -1,0 +1,15 @@
+<pre>{% if alarm_ts %}** ALARMA ACTIVADA a las {{ alarm_ts }} por {{ alarm_entity }}**
+{% endif %}- Último evento registrado:
+**Evento "{{ evento['event_type'] }}" a las {{ evento['ts_event'] }}:**
+    Movimiento Zona1: {{ evento['pir_1_st']|upper }} (desde las {{ evento['pir_1_ts'] }})
+{% if evento['cam_mov_1_st'] %}
+    Video-mov. Zona1: {{ evento['cam_mov_1_st']|upper }} (desde las {{ evento['cam_mov_1_ts'] }})
+{% endif %}
+    Movimiento Zona2: {{ evento['pir_2_st']|upper }} (desde las {{ evento['pir_2_ts'] }})
+{% if evento['cam_mov_2_st'] %}
+    Video-mov. Zona2: {{ evento['cam_mov_2_st']|upper }} (desde las {{ evento['cam_mov_2_ts'] }})
+{% endif %}
+    Inclinación: {{ evento['tilt_sensor_st']|upper }} (desde las {{ evento['tilt_sensor_ts'] }})
+    Sonido: {{ evento['sound_sensor_st']|upper }} (desde las {{ evento['sound_sensor_ts'] }})
+    Vibración: {{ evento['vibration_sensor_st']|upper }} (desde las {{ evento['vibration_sensor_ts'] }})
+{% if pre_alarm_ts %}[Pre-alarma activada a las {{ pre_alarm_ts }}]{% endif %}</pre>

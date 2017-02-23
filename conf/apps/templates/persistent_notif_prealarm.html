@@ -1,0 +1,13 @@
+<h3>Activaciones:</h3>
+{#<div>#}
+<table style='background-color: #f0aa28; color: white'>
+    <tbody>
+    {% for entity, ts in prealarms %}
+    <tr>
+        <td style='width: 40%'><strong>{{ ts }}</strong></td>
+        <td>{{ entity }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{#</div>#}

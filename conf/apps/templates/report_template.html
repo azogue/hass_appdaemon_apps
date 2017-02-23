@@ -1,0 +1,160 @@
+{% macro row_sensor(params_row, name, basename, color_ts='gray') %}
+<li>{{ name }}: <strong>{{ params_row[basename + '_st']|upper }}</strong> <small class="float-xs-right" style="color: {{ color_ts }};">(desde {{ params_row[basename + '_ts'] }})</small></li>
+{% endmacro %}
+
+{% macro row_evento(params_row, is_email, include_images_base64) %}
+{% if params_row['incluir'] %}
+<div class="container-fluid" style="padding-bottom: 20px;">
+    <div class="row">
+        <div class="col-xs-12 mb-2" style="background-color: {{ params_row['event_color'] }}; color: white;">
+            <br>
+            <h6 class="display-5"><strong>{{ params_row['event_type'] }} a las {{ params_row['ts_event'] }}:</strong></h6>
+{#            <small><strong>(Se generó en {{ params_row['took']|round(2) }} segs)</strong></small>#}
+        </div>
+        <div class="col-md-12 col-lg-4">
+            <br>
+            <h5><strong>Estado</strong> de los sensores:</h5>
+            <div class="rounded" style="width: 100%; border: solid; border-color: {{ params_row['event_color'] }}; border-width: 2px;">
+                <ul class="ml-0 mr-1 my-0">
+                    {{ row_sensor(params_row, 'PIR_1', 'pir_1') }}
+                    {{ row_sensor(params_row, 'CAM_1', 'cam_mov_1') }}
+                    {{ row_sensor(params_row, 'PIR_2', 'pir_2') }}
+                    {{ row_sensor(params_row, 'CAM_2', 'cam_mov_2') }}
+                    {{ row_sensor(params_row, 'Inclinación', 'tilt_sensor') }}
+                    {{ row_sensor(params_row, 'Sonido', 'sound_sensor') }}
+                    {{ row_sensor(params_row, 'Vibración', 'vibration_sensor') }}
+                </ul>
+            </div>
+        </div>
+        {% if params_row['ok_img1'] %}
+        <div class="col-md-12 col-lg-4">
+            <br>
+            <h5><strong>Zona 1</strong></h5>
+            {% if is_email %}
+                {% if include_images_base64 %}
+                <img class="rounded"
+                     style="width: 100%; border: solid; border-color: {{ params_row['event_color'] }}; border-width: 2px;"
+                     alt="{{ params_row['name_img1'] }}" src="data:image/jpg;base64,{{params_row['base64_img1']|safe}}" />
+                {% else %}
+                <img class="rounded"
+                     style="width: 100%; border: solid; border-color: {{ params_row['event_color'] }}; border-width: 2px;"
+                     alt="{{ params_row['name_img1'] }}" src="cid:{{params_row['id_img1']}}" />
+                {% endif %}
+            {% else %}
+            <img class="rounded"
+                 style="width: 100%; border: solid; border-color: {{ params_row['event_color'] }}; border-width: 2px;"
+                 alt="{{ params_row['name_img1'] }}" src="{{params_row['url_img1']|safe}}" />
+            {% endif %}
+        </div>
+        {% endif %}
+        {% if params_row['ok_img2'] %}
+        <div class="col-md-12 col-lg-4">
+            <br>
+            <h5><strong>Zona 2</strong></h5>
+            {% if is_email %}
+                {% if include_images_base64 %}
+                <img class="rounded"
+                     style="width: 100%; border: solid; border-color: {{ params_row['event_color'] }}; border-width: 2px;"
+                     alt="{{ params_row['name_img2'] }}" src="data:image/jpg;base64,{{params_row['base64_img2']|safe}}" />
+                {% else %}
+                <img class="rounded"
+                     style="width: 100%; border: solid; border-color: {{ params_row['event_color'] }}; border-width: 2px;"
+                     alt="{{ params_row['name_img2'] }}" src="cid:{{params_row['id_img2']}}" />
+                {% endif %}
+            {% else %}
+            <img class="rounded"
+                 style="width: 100%; border: solid; border-color: {{ params_row['event_color'] }}; border-width: 2px;"
+                 alt="{{ params_row['name_img2'] }}" src="{{params_row['url_img2']|safe}}" />
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% else %}
+<div class="container-fluid" style="padding-bottom: 20px;">
+    <div class="row">
+        <div class="col-xs-12" style="background-color: {{ params_row['event_color'] }}; color: white;">
+            <br>
+            <h6 class="display-5"><strong>{{ params_row['event_type'] }} a las {{ params_row['ts_event'] }}:</strong></h6>
+            <br>
+            <h5><strong>Estado</strong> de los sensores:</h5>
+            <ul class="ml-0 mr-1 my-1">
+                {{ row_sensor(params_row, 'PIR_1', 'pir_1', 'white') }}
+                {{ row_sensor(params_row, 'CAM_1', 'cam_mov_1', 'white') }}
+                {{ row_sensor(params_row, 'PIR_2', 'pir_2', 'white') }}
+                {{ row_sensor(params_row, 'CAM_2', 'cam_mov_2', 'white') }}
+                {{ row_sensor(params_row, 'Inclinación', 'tilt_sensor', 'white') }}
+                {{ row_sensor(params_row, 'Sonido', 'sound_sensor', 'white') }}
+                {{ row_sensor(params_row, 'Vibración', 'vibration_sensor', 'white') }}
+            </ul>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endmacro %}
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html lang="es" xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge">
+    <!--<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">-->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Informe de eventos</title>
+    <meta name="author" content="AzogueLabs" />
+    <meta name="description" content="VifiFeria Report. Auto-generated email" />
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-alpha.5/css/bootstrap.min.css" integrity="sha384-AysaV+vQoT3kOAXZkl02PThvDr8HYKPZhNT5h/CXfBThSRXQ6jW5DO2ekP5ViFdi" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.4.0/css/font-awesome.min.css">
+    <style type="text/css">
+        @font-face {
+          font-family: 'Inconsolata';
+          font-style: normal;
+          font-weight: 400;
+          src: local('Inconsolata'), url(http://fonts.gstatic.com/s/inconsolata/v12/BjAYBlHtW3CJxDcjzrnZCCwlidHJgAgmTjOEEzwu1L8.ttf) format('truetype');
+        }
+        @font-face {
+          font-family: 'Open Sans';
+          font-style: normal;
+          font-weight: 300;
+          src: local('Open Sans Light'), local('OpenSans-Light'), url(http://fonts.gstatic.com/s/opensans/v13/DXI1ORHCpsQm3Vp6mXoaTZS3E-kSBmtLoNJPDtbj2Pk.ttf) format('truetype');
+        }
+        html,body {
+            font-family:'Inconsolata',sans-serif;
+            font-size:15px;
+            line-height:1.5;
+        }
+        h1,h2,h3,h4,h5,h6 {
+            font-family:'Open Sans',Arial,sans-serif;
+            font-weight:400;
+            margin:10px 0
+        }
+    </style>
+</head>
+<body>
+{#    <div class="jumbotron jumbotron-fluid" style="background-color: #f00a2d; color: white; padding-bottom: 0; margin-bottom: 0;">#}
+{#    <div class="jumbotron jumbotron-fluid" style="background-color: #f0426a; color: white; padding-bottom: 0; margin-bottom: 0;">#}
+{#    <div class="jumbotron jumbotron-fluid" style="background-color: #f040aa; color: white; padding-bottom: 0; margin-bottom: 0;">#}
+{#    <div class="jumbotron jumbotron-fluid" style="background-color: #f0aa28; color: white; padding-bottom: 0; margin-bottom: 0;">#}
+{#    <div class="jumbotron jumbotron-fluid" style="background-color: #f08a2c; color: white; padding-bottom: 0; margin-bottom: 0;">#}
+{#    <div class="jumbotron jumbotron-fluid" style="background-color: #1393f0; color: white; padding-bottom: 0; margin-bottom: 0;">#}
+    <div class="jumbotron jumbotron-fluid" style="background-color: {{ color_title }}; color: white; padding-bottom: 0; margin-bottom: 0;">
+        <div class="container mx-1 py-1">
+            <h2>{% if title %}{{ title }}{% else %}Eventos registrados{% endif %}{% if ts_title %}<br>({{ ts_title }}){% endif %}</h2>
+        </div>
+    </div>
+    {% for row in eventos %}
+    {{ row_evento(row, is_email, include_images_base64) }}
+    {% endfor %}
+    <hr>
+    <br>
+    {% if is_email %}
+    <p class="lead mx-auto" style="text-align: center"><a href="{{ url_local_report }}">** Versión online de este informe **</a></p>
+    <br>
+    {% endif %}
+</body>
+{#<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.1.1/jquery.min.js" integrity="sha384-3ceskX3iaEnIogmQchP8opvBy3Mi7Ce34nWjpBIwVTHfGYWQS9jwHDVRnpKKHJg7" crossorigin="anonymous"></script>#}
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
+{#<script src="https://cdnjs.cloudflare.com/ajax/libs/tether/1.3.7/js/tether.min.js" integrity="sha384-XTs3FgkjiBgo8qjEjBk0tGmf3wPrWtA6coPfQDfFEY8AnYJwjalXCiosYRBIBZX8" crossorigin="anonymous"></script>#}
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0-alpha.5/js/bootstrap.min.js" integrity="sha384-BLiI7JTZm+JWlgKa0M0kGRpJbF2J8q+qreVrKBC47e3K6BW78kGLrCkeRX6I9RoK" crossorigin="anonymous"></script>
+</html>

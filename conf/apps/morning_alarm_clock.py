@@ -83,7 +83,8 @@ def make_notification_episode(ep_info):
     img_url = ep_info['episode']['image_url']
     data_msg = {"title": "Comienza el día en positivo!",
                 "message": message,
-                "data": {"push": {"badge": 0, "sound": "US-EN-Morgan-Freeman-Good-Morning.wav", "category": "ALARM"},
+                "data": {"push": {"badge": 0, "sound": "US-EN-Morgan-Freeman-Good-Morning.wav",
+                                  "category": "ALARMCLOCK"},
                          "attachment": {"url": img_url}}}
     return data_msg
 
@@ -225,9 +226,9 @@ class AlarmClock(appapi.AppDaemon):
                 ok = self.run_mopidy_stream_lacafetera(ep_info)
             # Notification:
             self.call_service(self._notifier.replace('.', '/'), **make_notification_episode(ep_info))
-        # Manual stop after at least 30 sec
+        # Manual stop after at least 15 sec
         elif ((new == 'off') and (old == 'on') and (self._last_trigger is not None) and
-                ((dt.datetime.now() - self._last_trigger).total_seconds() > 30)):
+                ((dt.datetime.now() - self._last_trigger).total_seconds() > 15)):
             # Stop if it's playing
             self.log('TRIGGER_STOP (last trigger at {})'.format(self._last_trigger))
             self.turn_off_alarm_clock()

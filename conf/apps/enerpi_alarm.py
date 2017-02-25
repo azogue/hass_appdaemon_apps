@@ -103,7 +103,7 @@ class EnerpiPeakNotifier(appapi.AppDaemon):
         self._main_power = self.args.get('control')
         conf_data = dict(self.config['AppDaemon'])
         self._notifier = conf_data.get('notifier').replace('.', '/')
-        self._camera = self.args.get('camera', None)
+        self._camera = self.args.get('camera')
         self._min_time_upper = int(self.args.get('min_time_high', DEFAULT_MIN_TIME_UPPER_SEC))
         self._min_time_lower = int(self.args.get('min_time_low', DEFAULT_MIN_TIME_LOWER_SEC))
 
@@ -136,28 +136,20 @@ class EnerpiPeakNotifier(appapi.AppDaemon):
 
         self.log('EnerpiPeakNotifier Initialized. P={}, with P>{} W for {} secs, (low={} W for {} secs). Notify: {}'
                  .format(self._main_power, self._upper_limit, self._min_time_upper,
-                         self._lower_limit, self._min_time_lower, self._notifier), level='INFO')
+                         self._lower_limit, self._min_time_lower, self._notifier))
 
     def _make_ios_message(self, reset_alarm=False):
         time_now = '{:%H:%M:%S}'.format(self._last_trigger) if self._last_trigger is not None else '???'
         if reset_alarm:
             data_msg = MASK_MSG_MAX_POWER_RESET.copy()
             data_msg["message"] = data_msg["message"].format(time_now, self._current_peak)
-            if self._camera is not None:
-                data_msg["data"] = {"push": {"category": "camera", "badge": 0}, "entity_id": self._camera}
-            else:
-                data_msg["data"] = {"push": {"category": "ALARM", "badge": 0}}
+            data_msg["data"] = {"push": {"category": "camera", "badge": 0}, "entity_id": self._camera}
         else:
             data_msg = MASK_MSG_MAX_POWER.copy()
             data_msg["message"] = data_msg["message"].format(self._current_peak, time_now)
-            if self._camera is not None:
-                data_msg["data"] = {"push": {"category": "camera",
-                                             "badge": 1,
-                                             "sound": "US-EN-Morgan-Freeman-Vacate-The-Premises.wav"},
-                                    "entity_id": self._camera}
-            else:
-                data_msg["data"] = {"push": {"category": "ALARM", "badge": 1,
-                                             "sound": "US-EN-Morgan-Freeman-Vacate-The-Premises.wav"}}
+            data_msg["data"] = {"push": {"category": "camera", "badge": 1,
+                                         "sound": "US-EN-Morgan-Freeman-Vacate-The-Premises.wav"},
+                                "entity_id": self._camera}
         return data_msg
 
     # noinspection PyUnusedLocal
@@ -167,7 +159,7 @@ class EnerpiPeakNotifier(appapi.AppDaemon):
         elif entity == self._slider_lower_limit:
             self._lower_limit = int(1000 * float(new))
         self.log('LIMIT CHANGE FROM "{}" TO "{}" --> upper_limit={} W, lower_limit={} W'
-                 .format(old, new, self._upper_limit, self._lower_limit), level='INFO')
+                 .format(old, new, self._upper_limit, self._lower_limit))
 
     # noinspection PyUnusedLocal
     def _main_power_change(self, entity, attribute, old, new, kwargs):

@@ -65,12 +65,12 @@ class KodiAssistant(appapi.AppDaemon):
         self._lights_off = self.args.get('lights_off', '').split(',')
 
         conf_data = dict(self.config['AppDaemon'])
-        self._media_player = conf_data.get('media_player', None)
-        self._notifier = conf_data.get('notifier', None)
+        self._media_player = conf_data.get('media_player')
+        self._notifier = conf_data.get('notifier').replace('.', '/')
 
-        _kodi_user = conf_data.get('kodi_user', None)
-        _kodi_pass = conf_data.get('kodi_pass', None)
-        self._kodi_ip = conf_data.get('kodi_ip', '127.0.0.1')
+        _kodi_user = conf_data.get('kodi_user')
+        _kodi_pass = conf_data.get('kodi_pass')
+        self._kodi_ip = conf_data.get('kodi_ip')
         self._kodi_url = 'http://{}:{}/jsonrpc'.format(self._kodi_ip, conf_data.get('kodi_port', 8080))
         self._kodi_auth = (_kodi_user, _kodi_pass) if _kodi_user is not None else None
 
@@ -108,40 +108,36 @@ class KodiAssistant(appapi.AppDaemon):
             self.log('No current playing item? -> {}'.format(ri.content), 'WARNING')
             return None
 
-    def _make_ios_message(self, state, item=None):
-        # TODO repair image attachment in iOS Notify
-        if item is None:
-            title = "KODI state"
-            message = "New state is *{}*".format(state)
-            data_msg = {"title": title, "message": message}
+    def _make_ios_message(self, item):
+        if item['type'] == 'episode':
+            title = "{} S{:02d}E{:02d} {}".format(item['showtitle'], item['season'], item['episode'], item['title'])
         else:
-            title = "{}: {}".format(state.capitalize() if state is not None else 'Playing', item['title'])
+            title = "Playing: {}".format(item['title'])
             if item['year']:
                 title += " [{}]".format(item['year'])
-            message = "{}\n∆T:{:.2f}h.".format(item['plot'], item['runtime'] / 3600)
-            try:
-                if 'thumbnail' in item:
-                    raw_img_url = item['thumbnail']
-                elif 'thumb' in item:
-                    raw_img_url = item['thumb']
-                elif 'poster' in item['art']:
-                    raw_img_url = item['art']['poster']
-                elif 'season.poster' in item['art']:
-                    raw_img_url = item['art']['season.poster']
-                else:
-                    self.log('No poster in item[art]={}'.format(item['art']))
-                    k = list(item['art'].keys())[0]
-                    raw_img_url = item['art'][k]
-                img_url = parse.unquote_plus(raw_img_url).rstrip('/').lstrip('image://')
-                if (self._kodi_ip not in img_url) and img_url.startswith('http://'):
-                    img_url = img_url.replace('http:', 'https:')
-                data_msg = {"title": title, "message": message,
-                            "data": {"attachment": {"url": img_url}, "push": {"category": "KODIPLAY"}}}
-                self.log('iOS MESSAGE: {}; item={}'.format(data_msg, item))
-            except KeyError as e:
-                self.log('iOS MESSAGE KeyError: {}; item={}'.format(e, item))
-                data_msg = {"title": title, "message": message, "data": {"push": {"category": "KODIPLAY"}}}
-        self.log(data_msg)
+        message = "{}\n∆T: {}.".format(item['plot'], dt.timedelta(hours=item['runtime'] / 3600))
+        try:
+            if 'thumbnail' in item:
+                raw_img_url = item['thumbnail']
+            elif 'thumb' in item:
+                raw_img_url = item['thumb']
+            elif 'poster' in item['art']:
+                raw_img_url = item['art']['poster']
+            elif 'season.poster' in item['art']:
+                raw_img_url = item['art']['season.poster']
+            else:
+                self.log('No poster in item[art]={}'.format(item['art']))
+                k = list(item['art'].keys())[0]
+                raw_img_url = item['art'][k]
+            img_url = parse.unquote_plus(raw_img_url).rstrip('/').lstrip('image://')
+            if (self._kodi_ip not in img_url) and img_url.startswith('http://'):
+                img_url = img_url.replace('http:', 'https:')
+            data_msg = {"title": title, "message": message,
+                        "data": {"attachment": {"url": img_url}, "push": {"category": "KODIPLAY"}}}
+            self.log('iOS MESSAGE: {}'.format(data_msg))
+        except KeyError as e:
+            self.log('iOS MESSAGE KeyError: {}; item={}'.format(e, item))
+            data_msg = {"title": title, "message": message, "data": {"push": {"category": "KODIPLAY"}}}
         return data_msg
 
     def _adjust_kodi_lights(self, play=True):
@@ -163,8 +159,8 @@ class KodiAssistant(appapi.AppDaemon):
             else:
                 try:
                     state_before = self._light_states[light_id]
-                except KeyError as e:
-                    self.error('{} --> light_states: {}'.format(e, self._light_states), level='ERROR')
+                except KeyError:
+                    # self.error('{} --> light_states: {}'.format(e, self._light_states), level='ERROR')
                     state_before = {}
                 if ('state' in state_before) and (state_before['state'] == 'on'):
                     try:
@@ -182,7 +178,9 @@ class KodiAssistant(appapi.AppDaemon):
     # noinspection PyUnusedLocal
     def kodi_state(self, entity, attribute, old, new, kwargs):
         """Kodi state change main control."""
-        if (old == 'idle') and (new == 'playing'):
+        # self.log('KODI DEBUG. old:{}, new:{}, is_playing_video={}'.format(old, new, self._is_playing_video))
+        # if (old == 'idle') and (new == 'playing'):
+        if new == 'playing':
             self._is_playing_video = self.kodi_is_playing_video()
             self.log('KODI START. old:{}, new:{}, is_playing_video={}'
                      .format(old, new, self._is_playing_video), LOG_LEVEL)
@@ -193,12 +191,11 @@ class KodiAssistant(appapi.AppDaemon):
                     self._item_playing = item_playing
                     new_video = True
                 now = ha.get_now()
-                if (self._last_play is None) or (now - self._last_play > dt.timedelta(seconds=30)):
+                if new_video or (self._last_play is None) or (now - self._last_play > dt.timedelta(seconds=30)):
                     self._last_play = now
-                    if new_video and (self._notifier is not None) and (self._item_playing['type'] in TYPE_ITEMS_NOTIFY):
+                    if new_video and (self._item_playing['type'] in TYPE_ITEMS_NOTIFY):
                         # iOS Notification
-                        self.call_service(self._notifier.replace('.', '/'),
-                                          **self._make_ios_message(new, item=self._item_playing))
+                        self.call_service(self._notifier, **self._make_ios_message(self._item_playing))
                         self._adjust_kodi_lights(play=True)
         elif (old == 'playing') and (new == 'idle') and self._is_playing_video:
             self._is_playing_video = False

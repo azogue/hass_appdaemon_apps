@@ -16,58 +16,42 @@
             <h5><strong>Estado</strong> de los sensores:</h5>
             <div class="rounded" style="width: 100%; border: solid; border-color: {{ params_row['event_color'] }}; border-width: 2px;">
                 <ul class="ml-0 mr-1 my-0">
-                    {{ row_sensor(params_row, 'PIR_1', 'pir_1') }}
-                    {{ row_sensor(params_row, 'CAM_1', 'cam_mov_1') }}
-                    {{ row_sensor(params_row, 'PIR_2', 'pir_2') }}
-                    {{ row_sensor(params_row, 'CAM_2', 'cam_mov_2') }}
-                    {{ row_sensor(params_row, 'Inclinación', 'tilt_sensor') }}
-                    {{ row_sensor(params_row, 'Sonido', 'sound_sensor') }}
-                    {{ row_sensor(params_row, 'Vibración', 'vibration_sensor') }}
+                    {% for pir in pirs %}
+                        {{ row_sensor(params_row, friendly_names[pir], 'pir_' + loop.index|string) }}
+                    {% endfor %}
+                    {% for cam_mov in cam_movs %}
+                        {{ row_sensor(params_row, friendly_names[cam_mov], 'cam_mov_' + loop.index|string) }}
+                    {% endfor %}
+                    {% for extra_s, code in extra_sensors %}
+                        {{ row_sensor(params_row, friendly_names[extra_s], code) }}
+                    {% endfor %}
                 </ul>
             </div>
         </div>
-        {% if params_row['ok_img1'] %}
+        {# Resolver ancho columnas bootstrap vs num_cameras #}
+        {% for i in range(num_cameras) %}
+        {% if params_row['ok_img' + loop.index|string] %}
         <div class="col-md-12 col-lg-4">
             <br>
-            <h5><strong>Zona 1</strong></h5>
+            <h5><strong>Zona {{ loop.index|string }}</strong></h5>
             {% if is_email %}
                 {% if include_images_base64 %}
                 <img class="rounded"
                      style="width: 100%; border: solid; border-color: {{ params_row['event_color'] }}; border-width: 2px;"
-                     alt="{{ params_row['name_img1'] }}" src="data:image/jpg;base64,{{params_row['base64_img1']|safe}}" />
+                     alt="{{ params_row['name_img' + loop.index|string] }}" src="data:image/jpg;base64,{{params_row['base64_img' + loop.index|string]|safe}}" />
                 {% else %}
                 <img class="rounded"
                      style="width: 100%; border: solid; border-color: {{ params_row['event_color'] }}; border-width: 2px;"
-                     alt="{{ params_row['name_img1'] }}" src="cid:{{params_row['id_img1']}}" />
+                     alt="{{ params_row['name_img' + loop.index|string] }}" src="cid:{{params_row['id_img' + loop.index|string]}}" />
                 {% endif %}
             {% else %}
             <img class="rounded"
                  style="width: 100%; border: solid; border-color: {{ params_row['event_color'] }}; border-width: 2px;"
-                 alt="{{ params_row['name_img1'] }}" src="{{params_row['url_img1']|safe}}" />
+                 alt="{{ params_row['name_img' + loop.index|string] }}" src="{{params_row['url_img' + loop.index|string]|safe}}" />
             {% endif %}
         </div>
         {% endif %}
-        {% if params_row['ok_img2'] %}
-        <div class="col-md-12 col-lg-4">
-            <br>
-            <h5><strong>Zona 2</strong></h5>
-            {% if is_email %}
-                {% if include_images_base64 %}
-                <img class="rounded"
-                     style="width: 100%; border: solid; border-color: {{ params_row['event_color'] }}; border-width: 2px;"
-                     alt="{{ params_row['name_img2'] }}" src="data:image/jpg;base64,{{params_row['base64_img2']|safe}}" />
-                {% else %}
-                <img class="rounded"
-                     style="width: 100%; border: solid; border-color: {{ params_row['event_color'] }}; border-width: 2px;"
-                     alt="{{ params_row['name_img2'] }}" src="cid:{{params_row['id_img2']}}" />
-                {% endif %}
-            {% else %}
-            <img class="rounded"
-                 style="width: 100%; border: solid; border-color: {{ params_row['event_color'] }}; border-width: 2px;"
-                 alt="{{ params_row['name_img2'] }}" src="{{params_row['url_img2']|safe}}" />
-            {% endif %}
-        </div>
-        {% endif %}
+        {% endfor %}
     </div>
 </div>
 {% else %}
@@ -79,13 +63,15 @@
             <br>
             <h5><strong>Estado</strong> de los sensores:</h5>
             <ul class="ml-0 mr-1 my-1">
-                {{ row_sensor(params_row, 'PIR_1', 'pir_1', 'white') }}
-                {{ row_sensor(params_row, 'CAM_1', 'cam_mov_1', 'white') }}
-                {{ row_sensor(params_row, 'PIR_2', 'pir_2', 'white') }}
-                {{ row_sensor(params_row, 'CAM_2', 'cam_mov_2', 'white') }}
-                {{ row_sensor(params_row, 'Inclinación', 'tilt_sensor', 'white') }}
-                {{ row_sensor(params_row, 'Sonido', 'sound_sensor', 'white') }}
-                {{ row_sensor(params_row, 'Vibración', 'vibration_sensor', 'white') }}
+                {% for pir in pirs %}
+                {{ row_sensor(params_row, friendly_names[pir], 'pir_' + loop.index|string, 'white') }}
+                {% endfor %}
+                {% for cam_mov in cam_movs %}
+                {{ row_sensor(params_row, friendly_names[cam_mov], 'cam_mov_' + loop.index|string, 'white') }}
+                {% endfor %}
+                {% for extra_s, code in extra_sensors %}
+                {{ row_sensor(params_row, friendly_names[extra_s], code, 'white') }}
+                {% endfor %}
             </ul>
         </div>
     </div>

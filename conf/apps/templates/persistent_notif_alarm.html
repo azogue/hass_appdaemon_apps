@@ -1,9 +1,5 @@
 <h3 style='padding-top: 5%; padding-bottom: 5%; background-color: #f00a2d; color: white'>
 <table>
-    <thead>
-        <th style='width: 40%'><strong>{{ ts }}</strong></th>
-        <th><strong>{{ entity }}</strong></th>
-    </thead>
     <tbody>
     {% for entity, ts in postalarms %}
     <tr>
@@ -11,18 +7,13 @@
         <td>{{ entity }}</td>
     </tr>
     {% endfor %}
+    <tr>
+        <td colspan="2" style='background-color: white; color: black;'>Activación de alarma:</td>
+    </tr>
+    <tr>
+        <td style='width: 40%'><strong>{{ ts }}</strong></td>
+        <td><strong>**{{ entity }}**</strong></td>
+    </tr>
     </tbody>
 </table>
 </h3>
-{#<div>#}
-{#<table style='background-color: #f0aa28; color: white'>#}
-{#    <tbody>#}
-{#    {% for entity, ts in prealarms %}#}
-{#    <tr>#}
-{#        <td style='width: 40%'><strong>{{ ts }}</strong></td>#}
-{#        <td>{{ entity }}</td>#}
-{#    </tr>#}
-{#    {% endfor %}#}
-{#    </tbody>#}
-{#</table>#}
-{#</div>#}

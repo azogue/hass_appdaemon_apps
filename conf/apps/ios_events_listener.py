@@ -20,8 +20,9 @@ DEFAULT_NOTIF_MASK = "Recibido en {:%d/%m/%y %H:%M:%S} desde {}. Raw: {}."
 NOTIF_MASK_ALARM_ON = "ALARMA CONECTADA en {:%d/%m/%y %H:%M:%S}, desde '{}'."
 NOTIF_MASK_ALARM_HOME = "Vigilancia conectada en casa a las {:%d/%m/%y %H:%M:%S}, desde '{}'."
 NOTIF_MASK_ALARM_OFF = "ALARMA DESCONECTADA en {:%d/%m/%y %H:%M:%S}, desde '{}'."
-NOTIF_MASK_TOGGLE_AMB = "Ambilight toggle {:%d/%m/%y %H:%M:%S}, from '{}'."
-NOTIF_MASK_TOGGLE_AMB_CONF = "Ambilight configuration toggle {:%d/%m/%y %H:%M:%S}, from '{}'."
+NOTIF_MASK_TOGGLE_AMB = "Cambio en modo Ambilight{:%d/%m/%y %H:%M:%S}, desde '{}'."
+NOTIF_MASK_TOGGLE_AMB_CONF = "Cambio en configuración de Ambilight (# de bombillas) {:%d/%m/%y %H:%M:%S}, desde '{}'."
+NOTIF_MASK_POSTPONE_ALARMCLOCK = "{:%d/%m/%y %H:%M:%S}: Postponer despertador (desde '{}')."
 NOTIF_MASK_LAST_VALIDATION = "Last validation: {:%d/%m/%y %H:%M:%S}, from '{}'."
 
 
@@ -35,17 +36,64 @@ class EventListener(appapi.AppDaemon):
     _lights_notif_state_attrs = None
     _notifier = None
 
+    # Family Tracker
+    _devs_to_track = None
+    _tracking_state = None
+
+    # _sended_notifications = {}
+
     def initialize(self):
         """AppDaemon required method for app init."""
         self._config = dict(self.config['AppDaemon'])
-        self._notifier = self._config.get('notifier', None)
+        self._notifier = self._config.get('notifier').replace('.', '/')
 
         # self._lights_notif = 'light.cuenco,light.bola_grande'
         self._lights_notif = 'light.cuenco'
         self.listen_event(self.receive_event, 'ios.notification_action_fired')
+        self.listen_event(self.receive_event, 'ios_iphone.notification_action_fired')
+        # self.listen_event(self.new_event_service_call, 'call_service')
+        # self.listen_event(self.new_event_service_call, 'service_executed')
 
+        # Tracking:
+        # self._devs_to_track = self.get_state('group.family', attribute='attributes')['entity_id']
+        self._devs_to_track = self.get_state('group.eugenio', attribute='attributes')['entity_id']
+        self._tracking_state = {dev: [self.get_state(dev), self.get_state(dev, attribute='last_changed')]
+                                for dev in self._devs_to_track}
+        [self.listen_state(self.track_zone_ch, dev, old="home", duration=180) for dev in self._tracking_state.keys()]
+        [self.listen_state(self.track_zone_ch, dev, new="home", duration=2) for dev in self._tracking_state.keys()]
+        self.log("**TRACKING STATE: {} -> {}".format(self._devs_to_track, self._tracking_state))
         # DEBUG:
         # self._test_notification_actions()
+
+    def _alguien_mas_en_casa(self, entity_exclude='no_excluir_nada'):
+        res = any([x[0] == 'home' for k, x in self._tracking_state.items() if k != entity_exclude])
+        self.log('DEBUG alguien_mas_en_casa? -> {}. De {}, excl={}'.format(res, self._tracking_state, entity_exclude))
+        return res
+
+    # noinspection PyUnusedLocal
+    def track_zone_ch(self, entity, attribute, old, new, kwargs):
+        last_st, last_ch = self._tracking_state[entity]
+        self._tracking_state[entity] = [new, self.datetime()]
+        if last_st != old:
+            self.error('TRACKING_STATE_CHANGE "{}" from "{}" [!="{}", changed at {}] to "{}"'
+                 .format(entity.lstrip('device_tracker.'), old, last_st, last_ch, new))
+        else:
+            self.log('TRACKING_STATE_CHANGE "{}" from "{}" [{}] to "{}"'
+                     .format(entity.lstrip('device_tracker.'), old, last_ch, new))
+            if (new == 'home') and not self._alguien_mas_en_casa(entity):
+                # Llegada a casa:
+                data_msg = {"title": "Bienvenido a casa",
+                            "message": "¿Qué puedo hacer por ti?",
+                            "data": {"push": {"badge": 0, "category": "INHOME"}}}
+                self.log('INHOME NOTIF: {}'.format(data_msg))
+                self.call_service(self._notifier, **data_msg)
+            elif (old == 'home') and not self._alguien_mas_en_casa(entity):
+                # Salida de casa:
+                data_msg = {"title": "Vuelve pronto!",
+                            "message": "¿Apagamos luces o encendemos alarma?",
+                            "data": {"push": {"badge": 0, "category": "AWAY"}}}
+                self.log('AWAY NOTIF: {}'.format(data_msg))
+                self.call_service(self._notifier, **data_msg)
 
     def light_flash(self, xy_color, persistence=5, n_flashes=3):
         """Flash hue lights as visual notification."""
@@ -87,55 +135,82 @@ class EventListener(appapi.AppDaemon):
 
     def receive_event(self, event_id, payload_event, *args):
         """Event listener."""
-        if event_id == 'ios.notification_action_fired':
+        if 'notification_action_fired' in event_id:
             action_name = payload_event['actionName']
             if action_name == 'com.apple.UNNotificationDefaultActionIdentifier':  # iOS Notification discard
-                self.log('NOTIFICATION Discard: Args={}, more={}'.format(payload_event, args))
+                self.log('NOTIFICATION Discard: {} - Args={}, more={}'.format(event_id, payload_event, args))
             else:
-                self.response_to_action(action_name, payload_event, *args)
-                self.log('NOTIFICATION actionName="{}" from dev="{}", otherArgs ={}'
+                self.log('RESPONSE_TO_ACTION "{}" from dev="{}", otherArgs ={}'
                          .format(payload_event['actionName'], payload_event['sourceDeviceName'], payload_event))
+                self.response_to_action(action_name, payload_event, *args)
         else:
             self.log('NOTIFICATION WTF: "{}", payload={}, otherArgs={}'.format(event_id, payload_event, args))
 
     def frontend_notif(self, action_name, payload_event, mask=DEFAULT_NOTIF_MASK):
         """Set a persistent_notification in frontend."""
         message = mask.format(dt.datetime.now(tz=conf.tz), payload_event['sourceDeviceName'], payload_event)
-        params_frontend_notif = {"notification_id": action_name, "title": action_name, "message": message}
-        self.call_service('persistent_notification/create', **params_frontend_notif)
+        self.persistent_notification(message, title=action_name, id=action_name)
 
-    # TODO terminar feedback de iOS Notifications
+    def _turn_off_lights_and_appliances(self, turn_off_heater=False):
+        self.turn_off('group.all_lights', transition=2)
+        self.turn_off("switch.calefactor")
+        self.turn_off("switch.cocina")
+        self.turn_off("switch.altavoz")
+        self.turn_off("switch.kodi_tv_salon")
+        if turn_off_heater:
+            self.turn_off("switch.caldera")
+
     def response_to_action(self, action_name, payload_event, *args):
         """Respond to defined action events."""
-
         # AWAY category
         if action_name == 'ALARM_ARM_NOW':  # Activar alarma
             self.log('ACTIVANDO ALARMA')
             self.frontend_notif(action_name, payload_event, mask=NOTIF_MASK_ALARM_ON)
-            self.call_service('light/turn_off', transition=2)
-            params = {"entity_id": "input_select.alarm_mode", "option": "Fuera de casa"}
-            self.call_service('input_select/select_option', **params)
+            self._turn_off_lights_and_appliances()
+            self.select_option("input_select.alarm_mode", option="Fuera de casa")
         elif action_name == 'ALARM_HOME':  # Activar vigilancia
             self.frontend_notif(action_name, payload_event, mask=NOTIF_MASK_ALARM_HOME)
             self.log('ACTIVANDO VIGILANCIA SIMPLE')
-            params = {"entity_id": "input_select.alarm_mode", "option": "En casa"}
-            self.call_service('input_select/select_option', **params)
+            self._turn_off_lights_and_appliances()
+            self.select_option("input_select.alarm_mode", option="En casa")
         elif action_name == 'LIGHTS_OFF':  # Apagar luces
             self.log('APAGANDO LUCES')
-            self.call_service('light/turn_off', transition=2)
-        elif action_name == 'NOTHING':  # No hacer nada
-            self.log('DOING NOTHING')
+            self._turn_off_lights_and_appliances()
+        elif action_name == 'AWAY_NOTHING':  # No hacer nada
+            self.log("YOU'RE AWAY & I'M DOING NOTHING... YOU KNOW YOU'RE DOING.")
 
-        # TODO ALARMSOUNDED category
+        # INHOME category
+        elif action_name == 'WELCOME_HOME':  # Desactivar alarma, encender luces
+            self.log(action_name)
+            self.select_option("input_select.alarm_mode", option="Desconectada")
+            self.turn_on("switch.cocina")
+            # params = {"entity_id": "light.salon"}
+            self.call_service('light/hue_activate_scene', group_name="Salón", scene_name='Semáforo')
+            self.frontend_notif(action_name, payload_event, mask=NOTIF_MASK_ALARM_OFF)
+            self.log('*iOS Action "{}" received. ALARM OFF. Kitchen ON, "Semáforo"("Salón")'.format(action_name))
+        elif action_name == 'WELCOME_HOME_TV':  # Desactivar alarma, encender luces
+            self.select_option("input_select.alarm_mode", option="Desconectada")
+            self.turn_on("switch.kodi_tv_salon")
+            self.call_service('light/hue_activate_scene', group_name="Salón", scene_name='Aurora boreal')
+            self.frontend_notif(action_name, payload_event, mask=NOTIF_MASK_ALARM_OFF)
+            self.log('*iOS Action "{}" received. ALARM OFF. TV ON, "Aurora boreal"("Salón")'.format(action_name))
+        elif action_name == 'IGNORE_HOME':  # Activar vigilancia
+            # self.frontend_notif(action_name, payload_event, mask=NOTIF_MASK_ALARM_HOME)
+            self.log('*iOS Action "{}" received. ALARM CONTINUES ON'.format(action_name))
+        elif action_name == 'HOME_NOTHING':  # No hacer nada
+            self.log('*iOS Action "{}" received. You\'re home & I\'m doing nothing...'.format(action_name))
+
+        # TODO ALARMSOUNDED category --> Implementar ALARMA
         elif action_name == 'TRIGGER_ALARM':  # ALARMA!
             self.frontend_notif(action_name, payload_event)
+            self.light_flash(XY_COLORS['red'], persistence=3, n_flashes=1)
         elif action_name == 'ALARM_SLEEP':  # Ignorar
             self.frontend_notif(action_name, payload_event)
+            self.light_flash(XY_COLORS['orange'], persistence=3, n_flashes=1)
         elif action_name == 'ALARM_CANCEL':  # Desconectar alarma
             self.log('DESACTIVANDO ALARMA')
             self.frontend_notif(action_name, payload_event, mask=NOTIF_MASK_ALARM_OFF)
-            params = {"entity_id": "input_select.alarm_mode", "option": "Desconectada"}
-            self.call_service('input_select/select_option', **params)
+            self.select_option("input_select.alarm_mode", option="Desconectada")
             self.light_flash(XY_COLORS['green'], persistence=2, n_flashes=5)
 
         # CONFIRM category
@@ -145,31 +220,32 @@ class EventListener(appapi.AppDaemon):
 
         # KODIPLAY category
         elif action_name == 'LIGHTS_ON':  # Lights ON!
-            self.log('Lights ON!')
             self.call_service('input_slider/select_value', entity_id="input_slider.light_main_slider_salon", value=254)
+            self.log('*iOS Action "{}" received. LIGHTS ON: LIGHT_MAIN_SLIDER_SALON -> 254'.format(action_name))
         elif action_name == 'HYPERION_TOGGLE':  # Toggle Ambilight
-            self.log('TOGGLE AMBILIGHT')
             self.frontend_notif(action_name, payload_event, mask=NOTIF_MASK_TOGGLE_AMB)
-            self.call_service('switch/toggle', entity_id="switch.toggle_kodi_ambilight")
+            self.toggle("switch.toggle_kodi_ambilight")
+            self.log('*iOS Action "{}" received. TOGGLE_KODI_AMBILIGHT'.format(action_name))
         elif action_name == 'HYPERION_CHANGE':  # Change Ambilight conf
-            self.log('CHANGE AMBILIGHT CONF')
             self.frontend_notif(action_name, payload_event, mask=NOTIF_MASK_TOGGLE_AMB_CONF)
-            selected = self.get_state(entity_id='input_select.salon_movie_mode')
-            self.log('DEBUG STATE INPUT_SELECT: "{}"'.format(selected))
-            if selected == 'Ambilight Day (4)':
-                params = {"entity_id": "input_select.salon_movie_mode", "option": "Ambilight Night (6)"}
-                self.call_service('input_select/select_option', **params)
-            elif selected == 'Ambilight Night (6)':
-                params = {"entity_id": "input_select.salon_movie_mode", "option": "Ambilight Day (4)"}
-                self.call_service('input_select/select_option', **params)
-            else:  # Activate
-                self.call_service('switch/turn_on', entity_id="switch.toggle_kodi_ambilight")
+            self.toggle("switch.toggle_config_kodi_ambilight")
+            self.log('*iOS Action "{}" received. CHANGE AMBILIGHT CONF'.format(action_name))
 
-        # TODO ALARM category
-        elif action_name == 'SOUND_ALARM':  # Sound Alarm!
+        # ALARMCLOCK category
+        elif action_name == 'INIT_DAY':  # A la ducha: Luces Energy + Calefactor!
             self.frontend_notif(action_name, payload_event)
-        elif action_name == 'SILENCE_ALARM':  # Silence Alarm ('textInput')
+            self.call_service('light/hue_activate_scene', group_name="Dormitorio", scene_name='Energía')
+            self.turn_on('switch.calefactor')
+            self.log('*iOS Action "{}" received. A NEW DAY STARTS WITH A WARM SHOWER'.format(action_name))
+        elif action_name == 'POSTPONE_ALARMCLOCK':  # Postponer despertador
+            self.frontend_notif(action_name, payload_event, mask=NOTIF_MASK_POSTPONE_ALARMCLOCK)
+            self.turn_off('input_boolean.manual_trigger_lacafetera')
+            self.log('*iOS Action "{}" received. Dormilón!'.format(action_name))
+            # TODO postponer_despertador listen_event en morning_alarm_clock
+            self.fire_event("postponer_despertador", jam="true")
+        elif action_name == 'ALARMCLOCK_OFF':  # Luces Energy
             self.frontend_notif(action_name, payload_event)
+            self.turn_off('input_boolean.manual_trigger_lacafetera')
 
         # TODO OTHER category
         elif action_name == 'OTHERSOUNDALARM':  # Sound Alarm
@@ -177,9 +253,10 @@ class EventListener(appapi.AppDaemon):
         elif action_name == 'OTHERSILENCEALARM':  # Silence Alarm
             self.frontend_notif(action_name, payload_event)
 
-        # TODO EXECORDER category with textInput
+        # TODO EXECORDER category with textInput no funciona!
         elif action_name == 'INPUTORDER':  # Tell me ('textInput')
             self.frontend_notif(action_name, payload_event)
+            self.light_flash(XY_COLORS['blue'], persistence=3, n_flashes=1)
         # Unrecognized cat
         else:
             self.log('NOTIFICATION WTF: "{}", payload={}, otherArgs={}'.format(action_name, payload_event, args))
@@ -197,10 +274,9 @@ class EventListener(appapi.AppDaemon):
             data_msg = {"title": "Test {}".format(category),
                         "message": "{} test iOS notif->{}".format(category, self._notifier),
                         "data": {"push": {"badge": args['badge'],
-                                          # "target": "28ab3a8f-3ff6-30cd-b93b-8bb854cbf483",
                                           "category": category}}}
             self.log('TEST PUSH_CATEGORY {} --> {}'.format(category, data_msg))
-            self.call_service(self._notifier.replace('.', '/'), **data_msg)
+            self.call_service(self._notifier, **data_msg)
 
         # noinspection PyUnusedLocal
         def _push_camera(*args):
@@ -211,11 +287,15 @@ class EventListener(appapi.AppDaemon):
                                           "hide-thumbnail": False},
                                  "entity_id": "camera.escam_qf001"}}  # "camera.picamera_salon"
             self.log('TEST PUSH_CAMERA --> {}'.format(data_msg))
-            self.call_service(self._notifier.replace('.', '/'), **data_msg)
+            self.call_service(self._notifier, **data_msg)
 
         # self.run_in(_flash_color, 5, color='orange')
-        self.run_in(_push_camera, 2)
+        # self.run_in(_push_camera, 2)
         # self.run_in(_push_category, 25, category='KODIPLAY', badge=1)
         # self.run_in(_push_category, 50, category='ALARMSOUNDED', badge=2)
-        self.run_in(_push_category, 10, category='AWAY', badge=3)
+        self.run_in(_push_category, 3, category='ALARMCLOCK', badge=3)
+        self.run_in(_push_category, 60, category='AWAY', badge=3)
+        self.run_in(_push_category, 120, category='INHOME', badge=3)
+        # self.run_in(_push_category, 40, category='AWAY', badge=3)
+        # self.run_in(_push_category, 60, category='INHOME', badge=3)
         # self.run_in(_push_category, 100, category='EXECORDER', badge=0)

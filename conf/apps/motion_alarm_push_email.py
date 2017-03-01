@@ -46,6 +46,7 @@ from collections import OrderedDict
 import datetime as dt
 from dateutil.parser import parse
 from functools import reduce
+from itertools import cycle
 from jinja2 import Environment, FileSystemLoader
 import json
 from math import ceil
@@ -61,7 +62,7 @@ LOG_LEVEL = 'INFO'
 
 NUM_RETRIES_MAX_GET_JPG_FROM_CAM = 10
 BYTES_MIN_FOR_JPG = 10.
-MIN_TIME_BETWEEN_MOTION = .5  # secs
+MIN_TIME_BETWEEN_MOTION = 1  # secs
 
 DEFAULT_RAWBS_SECS_OFF = 5
 DEFAULT_ESPERA_A_ARMADO_SEC = 10
@@ -85,7 +86,10 @@ EVENT_PREALARMA = "PRE-ALARMA"
 EVENT_ALARMA = "ALARMA"
 EVENT_EN_ALARMA = "EN ALARMA (ACTIVACION)"
 EVENT_ALARMA_ENCENDIDA = "ALARMA ENCENDIDA"
+AVISO_RETRY_ALARMA_ENCENDIDA_TITLE = "ALARMA ENCENDIDA"
+AVISO_RETRY_ALARMA_ENCENDIDA_MSG = "La alarma sigue encendida, desde las {:%H:%M:%S}. {}"
 HASS_COLOR = '#58C1F0'
+DEFAULT_ALARM_COLORS = [(255, 0, 0), (50, 0, 255)]  # para cycle en luces RGB (simulación de sirena)
 # Título, color, es_prioritario, subject_report
 EVENT_TYPES = OrderedDict(zip([EVENT_INICIO, EVENT_ACTIVACION, EVENT_DESCONEXION, EVENT_PREALARMA,
                                EVENT_ALARMA, EVENT_EN_ALARMA, EVENT_ALARMA_ENCENDIDA],
@@ -155,8 +159,11 @@ class MotionAlarm(appapi.AppDaemon):
     _min_delta_sec_events = None
     _delta_secs_trigger = None
     _use_push_notifier = False
-
+    _retry_push_alarm = None
+    _max_time_sirena_on = None
     _max_report_events = None
+    _alarm_lights = None
+    _cycle_colors = None
 
     _alarm_on = False
     _silent_mode = False
@@ -174,6 +181,7 @@ class MotionAlarm(appapi.AppDaemon):
     _dict_friendly_names = None
     _dict_sensor_classes = None
     _handler_periodic_trigger = None
+    _handler_retry_alert = None
     _handler_armado_alarma = None
     _ts_lastbeat = None
 
@@ -232,8 +240,6 @@ class MotionAlarm(appapi.AppDaemon):
         self._email_notifier = self.args.get('email_notifier')
         self._push_notifier = self.args.get('push_notifier')
         self._use_push_notifier_switch = self.args.get('usar_push_notifier', 'True')
-        self.log('NOTIFIERS: email={}, push={}, switch={}'
-                 .format(self._email_notifier, self._push_notifier, self._use_push_notifier_switch))
 
         # Hora de envío del informe diario de eventos detectados (si los ha habido)
         self._time_report = self.args.get('hora_informe', None)
@@ -246,6 +252,18 @@ class MotionAlarm(appapi.AppDaemon):
         self._delta_secs_trigger = int(self.args.get('delta_secs_trigger', DEFAULT_DELTA_SECS_TRIGGER))
         # Número de eventos máximo a incluir por informe en email. Se limita eliminando eventos de baja prioridad
         self._max_report_events = int(self.args.get('num_max_eventos_por_informe', DEFAULT_NUM_MAX_EVENTOS_POR_INFORME))
+        self._alarm_lights = self.args.get('alarm_rgb_lights', None)
+
+        # Insistencia de notificación de alarma encendida
+        self._retry_push_alarm = self.args.get('retry_push_alarm', None)
+        if self._retry_push_alarm is not None:
+            self._retry_push_alarm = int(self._retry_push_alarm)
+        # Persistencia de alarma encendida
+        self._max_time_sirena_on = self.args.get('max_time_alarm_on', None)
+        if self._max_time_sirena_on is not None:
+            self._max_time_sirena_on = int(self._max_time_sirena_on)
+        self.log('Insistencia de notificación de alarma: {}; Persistencia de sirena: {}'
+                 .format(self._retry_push_alarm, self._max_time_sirena_on))
 
         # RAW SENSORS:
         if self._raw_sensors is not None:
@@ -271,6 +289,8 @@ class MotionAlarm(appapi.AppDaemon):
         # Listen to main events:
         self.listen_event(self.receive_init_event, 'ha_started')
         self.listen_event(self.device_tracker_new_device, 'device_tracker_new_device')
+        self.listen_event(self._reset_alarm_state, 'reset_alarm_state')
+        self.listen_event(self._turn_off_sirena_in_alarm_state, 'silent_alarm_state')
         self._events_data = []
 
         # Main switches:
@@ -287,7 +307,9 @@ class MotionAlarm(appapi.AppDaemon):
                                  for s_input, s_use in zip(all_sensors, all_sensors_use)}
         self._dict_friendly_names = {s: self.get_state(s, attribute='friendly_name') for s in all_sensors}
         self._dict_friendly_names.update({c: self.get_state(c, attribute='friendly_name') for c in self._cameras})
-        self._dict_sensor_classes = {s: self.get_state(s, attribute='sensor_class') for s in all_sensors}
+        # TODO Revisar device_class vs sensor_class para v > 0.39
+        # self._dict_sensor_classes = {s: self.get_state(s, attribute='sensor_class') for s in all_sensors}
+        self._dict_sensor_classes = {s: self.get_state(s, attribute='device_class') for s in all_sensors}
 
         # Movement detection
         for s_mov in all_sensors:
@@ -298,20 +320,16 @@ class MotionAlarm(appapi.AppDaemon):
             time_alarm = reduce(lambda x, y: x.replace(**{y[1]: int(y[0])}),
                                 zip(self._time_report.split(':'), ['hour', 'minute', 'second']),
                                 self.datetime().replace(second=0, microsecond=0))
-            self.run_daily(self._email_events_data, time_alarm.time())
+            self.run_daily(self.email_events_data, time_alarm.time())
             self.log('Creado timer para informe diario de eventos a las {} de cada día'.format(time_alarm.time()))
+
+        # Simulación de alarma visual con luces RBG (opcional)
+        if self._alarm_lights is not None:
+            self._cycle_colors = cycle(DEFAULT_ALARM_COLORS)
+            self.log('Alarma visual con luces RGB: {}; colores: {}'.format(self._alarm_lights, self._cycle_colors))
 
         # Notifica inicio
         self.receive_init_event('inicio_appdaemon', None)
-        # if LOG_LEVEL == 'INFO':
-        #     self.log('*****ALARM PARAMS*****')
-        #     for k, v in sorted(self.to_dict().items()):
-        #         self.log('**{}** --> {} [{}]'.format(k, v, type(v)))
-
-    # TODO BT devices con eventos de entrada en escena, procesar si alarm_on
-    # def device_is_near(self, event_id, payload_event, *args):
-    #     """Event listener."""
-    #     self.log('INIT_EVENT RECEIVED: "{}", payload={}, otherArgs={}'.format(event_id, payload_event, args))
 
     def _listconf_param(self, conf_args, param_name, is_secret=False, is_json=False, min_len=None, default=None):
         """Carga de configuración de lista de entidades de HA"""
@@ -372,52 +390,6 @@ class MotionAlarm(appapi.AppDaemon):
             self.log('LISTEN TO CHANGES IN SWITCH: {} -> {}, ST={}'.format(identif, entity_switch, state), LOG_LEVEL)
             return state
 
-    def to_dict(self):
-        params = dict(
-            pirs=self._pirs,
-            use_pirs=self._use_pirs,
-            camera_movs=self._camera_movs,
-            use_cams_movs=self._use_cams_movs,
-            extra_sensors=self._extra_sensors,
-            use_extra_sensors=self._use_extra_sensors,
-            d_asign_switchs_inputs=self._dict_asign_switchs_inputs,
-            cameras=self._cameras,
-            cameras_jpg_ip=self._cameras_jpg_ip,
-            cameras_jpg_params=self._cameras_jpg_params,
-            main_switch=self._main_switch,
-            rele_sirena=self._rele_sirena,
-            rele_secundario=self._rele_secundario,
-            led_act=self._led_act,
-            use_push_notifier_switch=self._use_push_notifier_switch,
-            silent_mode_switch=self._silent_mode_switch,
-            # tz=self._tz,
-            time_report=self._time_report,
-            espera_a_armado_sec=self._espera_a_armado_sec,
-            reset_prealarm_time_sec=self._reset_prealarm_time_sec,
-            min_delta_sec_events=self._min_delta_sec_events,
-            delta_secs_trigger=self._delta_secs_trigger,
-            use_push_notifier=self._use_push_notifier,
-            max_report_events=self._max_report_events,
-            alarm_on=self._alarm_on,
-            silent_mode=self._silent_mode,
-            alarm_state=self._alarm_state,
-            alarm_state_ts_trigger=self._alarm_state_ts_trigger,
-            alarm_state_entity_trigger=self._alarm_state_entity_trigger,
-            pre_alarm_on=self._pre_alarm_on,
-            pre_alarm_ts_trigger=self._pre_alarm_ts_trigger,
-            # pre_alarms=self._pre_alarms,
-            # post_alarms=self._post_alarms,
-            # events_data=self._events_data,
-            in_capture_mode=self._in_capture_mode,
-            ts_lastcap=self._ts_lastcap,
-            ts_lastbeat=self._ts_lastbeat,
-            dict_use_inputs=self._dict_use_inputs,
-            # handler_periodic_trigger=self._handler_periodic_trigger,
-            # handler_armado_alarma=self._handler_armado_alarma,
-            # known_devices=self._known_devices,
-            dict_friendly_names=self._dict_friendly_names, dict_sensor_classes=self._dict_sensor_classes)
-        return params
-
     def _is_too_old(self, ts, delta_secs):
         if ts is None:
             return True
@@ -426,34 +398,40 @@ class MotionAlarm(appapi.AppDaemon):
             return (now - ts).total_seconds() > delta_secs
 
     # noinspection PyUnusedLocal
+    def track_device_in_zone(self, entity, attribute, old, new, kwargs):
+        if self._alarm_on:
+            self.log('* DEVICE: "{}", from "{}" to "{}"'.format(entity, kwargs['codename'], old, new))
+
+    # noinspection PyUnusedLocal
+    def _reload_known_devices(self, *args):
+        # Reload known_devices from yaml file:
+        with open(self._secrets['path_known_dev']) as f:
+            new_known_devices = yaml.load(f.read())
+        if self._known_devices is None:
+            self.log('KNOWN_DEVICES: {}'.format(['{name} [{mac}]'.format(**v) for v in new_known_devices.values()]))
+        else:
+            if any([dev not in self._known_devices.keys() for dev in new_known_devices.keys()]):
+                for dev, dev_data in new_known_devices.items():
+                    if dev not in new_known_devices.keys():
+                        new_dev = '{name} [{mac}]'.format(**dev_data)
+                        self.listen_state(self.track_device_in_zone, dev, old="home", codename=new_dev)
+                        self.log('NEW KNOWN_DEV: {}'.format(new_dev))
+        self._known_devices = new_known_devices
+
+    # noinspection PyUnusedLocal
     def device_tracker_new_device(self, event_id, payload_event, *args):
         """Event listener."""
-        self.log('* DEVICE_TRACKER_NEW_DEVICE RECEIVED * --> {}: {}'.format(payload_event['entity_id'], payload_event))
-        # TODO listener for new detected bt device
-        # self.append_event_data(dict(event_type=EVENT_INICIO))
-        # self._text_notification()
-        # self.listen_state(self._track_devices, payload_event['entity_id'])
+        dev = payload_event['entity_id']
+        self.log('* DEVICE_TRACKER_NEW_DEVICE RECEIVED * --> {}: {}'.format(dev, payload_event))
+        self.run_in(self._reload_known_devices, 5)
 
     # noinspection PyUnusedLocal
     def receive_init_event(self, event_id, payload_event, *args):
         """Event listener."""
         self.log('* INIT_EVENT * RECEIVED: "{}", payload={}'.format(event_id, payload_event))
         self.append_event_data(dict(event_type=EVENT_INICIO))
-        self._text_notification()
-
-        # Reload known_devices from yaml file:
-        # with open(PATH_KNOWN_DEV) as f:
-        #     new_known_devices = yaml.load(f.read())
-        # if self._known_devices is None:
-        #     self.log('KNOWN_DEVICES: {}'.format(['{name} [{mac}]'.format(**v) for v in new_known_devices.values()]))
-        # else:
-        #     if any([dev not in self._known_devices.keys() for dev in new_known_devices.keys()]):
-        #         self.log('NEW KNOWN_DEVS: {}'.format(['{name} [{mac}]'.format(**dev_data)
-        #                                               for dev, dev_data in new_known_devices.items()
-        #                                               if dev not in new_known_devices.keys()]))
-        #         # TODO fijar listener para new devices
-        #         # self.listen_event(self.device_tracker_new_device, 'device_tracker_new_device')
-        # self._known_devices = new_known_devices
+        self.text_notification()
+        self._reload_known_devices()
 
     def _make_event_path(self, event_type, id_cam):
         now = dt.datetime.now(tz=self._tz)
@@ -531,19 +509,19 @@ class MotionAlarm(appapi.AppDaemon):
                       base64_img2=b64encode(bytes_img2).decode())
         """
         event_type = kwargs.get('event_type')
+        entity_trigger = kwargs.get('entity_trigger', None)
         prioridad = EVENT_TYPES[event_type][2]
 
         proceed = False
         with self._lock:
-            if not self._in_capture_mode:
-                proceed = self._is_too_old(self._ts_lastcap, self._min_delta_sec_events)
-                self._in_capture_mode = proceed
-        # if not self._in_capture_mode or self._is_too_old(self._ts_lastbeat, 2 * self._min_delta_sec_events):
-        if proceed:
             tic = time()
+            if not self._in_capture_mode:
+                proceed = (prioridad > 1) or self._is_too_old(self._ts_lastcap, self._min_delta_sec_events)
+                self._in_capture_mode = proceed
+        if proceed:
             now = dt.datetime.now(tz=self._tz)
             params = dict(ts=now, ts_event='{:%H:%M:%S}'.format(now), incluir=True, prioridad=prioridad,
-                          event_type=event_type, event_color=EVENT_TYPES[event_type][1])
+                          event_type=event_type, event_color=EVENT_TYPES[event_type][1], entity_trigger=entity_trigger)
 
             # Binary sensors: PIR's, camera_movs, extra_sensors:
             for i, p in enumerate(self._pirs):
@@ -574,21 +552,10 @@ class MotionAlarm(appapi.AppDaemon):
                 # self._ts_lastcap = now + dt.timedelta(seconds=params['took'])
                 self._ts_lastcap = now
         else:
-            if prioridad > 9:
-                self.log('SOLAPAMIENTO EN APPEND_EVENT CRÍTICO. REINTENTAR. "{}"; ts_lastcap={}'
-                         .format(event_type, self._ts_lastcap), 'WARNING')
-                # stack overflow danger: recursivity limit
-                if 'retry_append' not in kwargs.keys():
-                    kwargs['retry_append'] = 0
-                kwargs.update(retry_append=kwargs['retry_append'] + 1)
-                if kwargs['retry_append'] > 3:
-                    self.run_in(self.append_event_data, 1, **kwargs)
-                else:
-                    self.append_event_data(kwargs, *args)
-            elif prioridad > 1:
+            if prioridad > 1:
                 self.log('SOLAPAMIENTO DE LLAMADAS A APPEND_EVENT. POSPUESTO. "{}"; ts_lastcap={}'
                          .format(event_type, self._ts_lastcap), 'WARNING')
-                self.run_in(self.append_event_data, 1.5, **kwargs)
+                self.run_in(self.append_event_data, 1, **kwargs)
             else:
                 self.log('SOLAPAMIENTO DE LLAMADAS A APPEND_EVENT. DESECHADO. "{}"; ts_lastcap={}'
                          .format(event_type, self._ts_lastcap))
@@ -604,6 +571,7 @@ class MotionAlarm(appapi.AppDaemon):
             self._pre_alarms = []
             self._post_alarms = []
             self._handler_periodic_trigger = None
+            self._handler_retry_alert = None
 
     # noinspection PyUnusedLocal
     def _armado_sistema(self, *args):
@@ -612,7 +580,7 @@ class MotionAlarm(appapi.AppDaemon):
             self._alarm_on = True
         self._reset_session_data()
         self.append_event_data(dict(event_type=EVENT_ACTIVACION))
-        self._text_notification()
+        self.text_notification()
 
     # noinspection PyUnusedLocal
     def _main_switch_ch(self, entity, attribute, old, new, kwargs):
@@ -637,11 +605,13 @@ class MotionAlarm(appapi.AppDaemon):
                 # send & reset events
                 if self._events_data:
                     self.append_event_data(dict(event_type=EVENT_DESCONEXION))
-                    self._text_notification()
-                    self._email_events_data()
+                    self.text_notification()
+                    self.email_events_data()
 
                 # reset ts alarm & pre-alarm
                 self._reset_session_data()
+                if self._alarm_lights is not None:
+                    self.call_service("light/turn_off", entity_id=self._alarm_lights, transition=1)
                 self.log('--> ALARMA DESCONECTADA')
         elif entity == self._use_push_notifier_switch:
             self._use_push_notifier = new == 'on'
@@ -649,6 +619,8 @@ class MotionAlarm(appapi.AppDaemon):
         elif entity == self._silent_mode_switch:
             self._silent_mode = new == 'on'
             self.log('SILENT MODE: {}'.format(self._silent_mode))
+            if self._alarm_state and self._silent_mode:
+                self.call_service('{}/turn_off'.format(self._rele_sirena.split('.')[0]), entity_id=self._rele_sirena)
         else:
             self.log('Entity unknown in _main_switch_ch: {} (from {} to {}, attrs={}'
                      .format(entity, old, new, attribute), 'ERROR')
@@ -674,6 +646,47 @@ class MotionAlarm(appapi.AppDaemon):
         return False
 
     # noinspection PyUnusedLocal
+    def _reset_alarm_state(self, *args):
+        """Reset del estado de alarma ON. La alarma sigue encendida, pero se pasa a estado inactivo en espera"""
+        process = False
+        with self._lock:
+            if self._alarm_on and self._alarm_state:
+                self._alarm_state = False
+                self._alarm_state_ts_trigger = None
+                self._alarm_state_entity_trigger = None
+                # self._events_data = []
+                self._pre_alarms = []
+                self._post_alarms = []
+                self._pre_alarm_on = False
+                self._pre_alarm_ts_trigger = None
+                self._handler_periodic_trigger = None
+                self._handler_retry_alert = None
+                process = True
+        if process:
+            self.log('** RESET OF ALARM STATE')
+            # apagado de relés de alarma:
+            [self.call_service('{}/turn_off'.format(ent.split('.')[0]), entity_id=ent)
+             for ent in [self._rele_sirena, self._rele_secundario, self._led_act] if ent is not None]
+            if self._alarm_lights is not None:
+                self.call_service("light/turn_off", entity_id=self._alarm_lights, transition=1)
+
+    # noinspection PyUnusedLocal
+    def _turn_off_sirena_in_alarm_state(self, *args):
+        """Apaga el relé asociado a la sirena.
+        La alarma sigue encendida y grabando eventos en activaciones de sensor y periódicamente."""
+        process = False
+        with self._lock:
+            if self._alarm_on and self._alarm_state and not self._silent_mode:
+                # self._silent_mode = True
+                process = True
+        if process:
+            # apagado de relés de alarma:
+            self.log('** Apagado del relé de la sirena de alarma')
+            self.call_service('{}/turn_off'.format(self._rele_sirena.split('.')[0]), entity_id=self._rele_sirena)
+            if self._alarm_lights is not None:
+                self.call_service("light/turn_off", entity_id=self._alarm_lights, transition=1)
+
+    # noinspection PyUnusedLocal
     def _turn_off_prealarm(self, *args):
         proceed = False
         with self._lock:
@@ -688,6 +701,14 @@ class MotionAlarm(appapi.AppDaemon):
 
     # noinspection PyUnusedLocal
     def _motion_detected(self, entity, attribute, old, new, kwargs):
+        """Lógica de activación de alarma por detección de movimiento.
+         - El 1º evento pone al sistema en 'pre-alerta', durante un tiempo determinado. Se genera un evento.
+         - Si se produce un 2º evento en estado de pre-alerta, comienza el estado de alerta, se genera un evento,
+            se disparan los relés asociados, se notifica al usuario con push_notif + email, y se inician los actuadores
+            periódicos.
+         - Las siguientes detecciones generan nuevos eventos, que se acumulan hasta que se desconecte la alarma y se
+            notifique al usuario por email.
+        """
         # self.log('DEBUG MOTION: {}, {}->{}'.format(entity, old, new))
         if self._validate_input(entity):
             # Actualiza persistent_notification de entity en cualquier caso
@@ -700,7 +721,6 @@ class MotionAlarm(appapi.AppDaemon):
             with self._lock:
                 if self._ts_lastbeat is not None:
                     delta_beat = (now - self._ts_lastbeat).total_seconds()
-                # self.log('ADQUIRE LOCK ts={}, entity={}, ∆T={:.6f}s'.format(now, entity, delta_beat))
                 if delta_beat > MIN_TIME_BETWEEN_MOTION:
                     if self._alarm_state:
                         priority = 1
@@ -711,7 +731,6 @@ class MotionAlarm(appapi.AppDaemon):
                         priority = 2
                         self._pre_alarm_on = True
                     self._ts_lastbeat = now
-            # self.log('LOST LOCK ts={}, entity={}'.format(now, entity))
 
             # self.log('DEBUG MOTION "{}": "{}"->"{}" at {:%H:%M:%S.%f}. A={}, ST_A={}, ST_PRE-A={}'
             #          .format(entity, old, new, now, self._alarm_on, self._alarm_state, self._pre_alarm_on))
@@ -722,8 +741,8 @@ class MotionAlarm(appapi.AppDaemon):
                 if self._led_act is not None:
                     self.call_service('switch/toggle', entity_id=self._led_act)
                 if self._is_too_old(self._ts_lastcap, self._min_delta_sec_events):
-                    self.append_event_data(dict(event_type=EVENT_EN_ALARMA))
-                self._alarm_persistent_notification(entity, now)
+                    self.append_event_data(dict(event_type=EVENT_EN_ALARMA, entity_trigger=entity))
+                self.alarm_persistent_notification(entity, now)
             # Trigger ALARMA después de pre-alarma
             # elif self._pre_alarm_on:
             elif priority == 3:
@@ -734,22 +753,33 @@ class MotionAlarm(appapi.AppDaemon):
                 self._alarm_state = True
                 if self._handler_periodic_trigger is None:  # Sólo 1ª vez!
                     if not self._silent_mode:
-                        [self.call_service('{}/turn_on'.format(ent.split('.')[0]), entity_id=ent)
-                         for ent in [self._rele_sirena, self._rele_secundario] if ent is not None]
-                    self.append_event_data(dict(event_type=EVENT_ALARMA, send_events=True))
-                    self._text_notification()
-                    self._alarm_persistent_notification()
-                    self._email_events_data()
+                        self.call_service('{}/turn_on'.format(self._rele_sirena.split('.')[0]),
+                                          entity_id=self._rele_sirena)
+                    self.call_service('{}/turn_on'.format(self._rele_secundario.split('.')[0]),
+                                      entity_id=self._rele_secundario)
+                    self.append_event_data(dict(event_type=EVENT_ALARMA, entity_trigger=entity))
+                    self.text_notification(append_extra_data=True)
+                    self.alarm_persistent_notification()
+                    self.email_events_data()
                     # Empieza a grabar eventos periódicos cada DELTA_SECS_TRIGGER:
                     self._handler_periodic_trigger = self.run_in(self.periodic_capture_mode, self._delta_secs_trigger)
+                    if self._max_time_sirena_on is not None:
+                        # Programa el apagado automático de la sirena pasado cierto tiempo desde la activación.
+                        self.run_in(self._turn_off_sirena_in_alarm_state, self._max_time_sirena_on)
+                    if (self._handler_retry_alert is None) and (self._retry_push_alarm is not None):  # Sólo 1ª vez!
+                        # Empieza a notificar la alarma conectada cada X minutos
+                        self._handler_retry_alert = self.run_in(self.periodic_alert, self._retry_push_alarm)
+                    # Sirena visual con RGB lights:
+                    if self._alarm_lights is not None:
+                        self.run_in(self._flash_alarm_lights, 2)
             # Dispara estado pre-alarma
             elif priority == 2:
                 self.log('** PRE-ALARMA ** activada por "{}"'.format(entity), LOG_LEVEL)
                 self._pre_alarm_ts_trigger = now
                 self._pre_alarm_on = True
                 self.run_in(self._turn_off_prealarm, self._reset_prealarm_time_sec)
-                self._prealarm_persistent_notification(entity, now)
-                self.append_event_data(dict(event_type=EVENT_PREALARMA))
+                self.prealarm_persistent_notification(entity, now)
+                self.append_event_data(dict(event_type=EVENT_PREALARMA, entity_trigger=entity))
                 if self._led_act is not None:
                     self.call_service('switch/turn_on', entity_id=self._led_act)
             else:
@@ -757,19 +787,35 @@ class MotionAlarm(appapi.AppDaemon):
 
     # noinspection PyUnusedLocal
     def periodic_capture_mode(self, *args):
+        """Ejecución periódica con la alarma encendida para capturar eventos cada cierto tiempo."""
         # self.log('EN PERIODIC_CAPTURE_MODE con ∆T={} s'.format(self._delta_secs_trigger))
         proceed = append_event = False
         with self._lock:
             if self._alarm_state:
-                append_event = self._is_too_old(self._ts_lastbeat, self._min_delta_sec_events)
                 proceed = True
-            else:
-                # self.log('STOP PERIODIC CAPTURE MODE')
-                self._handler_periodic_trigger = None
+                append_event = self._is_too_old(self._ts_lastbeat, self._min_delta_sec_events)
         if proceed:
             if append_event:
                 self.append_event_data(dict(event_type=EVENT_ALARMA_ENCENDIDA))
             self.run_in(self.periodic_capture_mode, self._delta_secs_trigger)
+        else:
+            # self.log('STOP PERIODIC CAPTURE MODE')
+            self._handler_periodic_trigger = None
+
+    # noinspection PyUnusedLocal
+    def periodic_alert(self, *args):
+        """Ejecución periódica con la alarma encendida para enviar una notificación recordando dicho estado."""
+        self.log('EN PERIODIC_ALERT con ∆T={} s'.format(self._retry_push_alarm))
+        proceed = False
+        with self._lock:
+            if self._alarm_state:
+                proceed = True
+        if proceed:
+            self.periodic_alert_notification()
+            self.run_in(self.periodic_alert, self._retry_push_alarm)
+        else:
+            self.log('STOP PERIODIC ALERT')
+            self._handler_retry_alert = None
 
     # def _persistent_notification(self, trigger_entity, ts, title=None, unique_id=True):
     #     f_name = notif_id = self._dict_friendly_names[trigger_entity]
@@ -781,7 +827,8 @@ class MotionAlarm(appapi.AppDaemon):
     #     self.persistent_notification(**params)
     #     # self.log('PERSISTENT NOTIFICATION: {}'.format(params))
 
-    def _alarm_persistent_notification(self, trigger_entity=None, ts=None):
+    def alarm_persistent_notification(self, trigger_entity=None, ts=None):
+        """Notificación en el frontend de alarma activada."""
         if trigger_entity is not None:
             self._post_alarms.append((self._dict_friendly_names[trigger_entity], '{:%H:%M:%S}'.format(ts)))
         params_templ = dict(ts='{:%H:%M:%S}'.format(self._alarm_state_ts_trigger),
@@ -792,14 +839,46 @@ class MotionAlarm(appapi.AppDaemon):
         # self.log('DEBUG ALARM PERSISTENT NOTIFICATION: {}'.format(params))
         self.persistent_notification(**params)
 
-    def _prealarm_persistent_notification(self, trigger_entity, ts):
+    def prealarm_persistent_notification(self, trigger_entity, ts):
+        """Notificación en el frontend de pre-alarma activada."""
         self._pre_alarms.append((self._dict_friendly_names[trigger_entity], '{:%H:%M:%S}'.format(ts)))
         message = JINJA2_ENV.get_template('persistent_notif_prealarm.html').render(prealarms=self._pre_alarms[::-1])
         params = dict(message=message, title="PRE-ALARMA", id='prealarm')
         # self.log('DEBUG PRE-ALARM PERSISTENT NOTIFICATION: {}'.format(params))
         self.persistent_notification(**params)
 
-    def _text_notification(self):
+    def periodic_alert_notification(self):
+        """Notificación de recordatorio de alarma encendida."""
+        if self._alarm_state:
+            extra = ''
+            if self._rele_sirena is not None:
+                extra += 'Sirena: {}. '.format(self.get_state(self._rele_sirena))
+            msg = AVISO_RETRY_ALARMA_ENCENDIDA_MSG.format(self._alarm_state_ts_trigger, extra)
+            params = dict(title=AVISO_RETRY_ALARMA_ENCENDIDA_TITLE, message=msg)
+            if self._use_push_notifier:
+                service = self._push_notifier
+                if self._events_data and ('url_img1' in self._events_data[-1]):
+                    url_usar = self._events_data[-1]['url_img1']
+                else:
+                    url_usar = self._secrets['hass_base_url']
+                if 'ios' in service:
+                    params.update(data=dict(push=dict(badge=2, sound="US-EN-Morgan-Freeman-Motion-Detected.wav",
+                                                      category="ALARMSOUNDED"),
+                                            attachment=dict(url=url_usar)))
+                elif 'pushbullet' in service:
+                    # params.update(data=dict(url=url_usar))
+                    params.update(target=self._secrets['pb_target'], data=dict(url=url_usar))
+
+                self.log('PUSH TEXT NOTIFICATION "{title}": {message}, {data}'.format(**params))
+            else:
+                params.update(target=self._secrets['email_target'])
+                params['message'] += '\n\nURL del sistema de vigilancia: {}'.format(self._secrets['hass_base_url'])
+                service = self._email_notifier
+                self.log('EMAIL RAW TEXT NOTIFICATION: {title}: {message}'.format(**params))
+            self.call_service(service, **params)
+
+    def text_notification(self, append_extra_data=False):
+        """Envía una notificación de texto plano con el status del último evento añadido."""
         if self._events_data:
             last_event = self._events_data[-1]
             event_type = last_event['event_type']
@@ -814,8 +893,21 @@ class MotionAlarm(appapi.AppDaemon):
             msg_text = msg.replace('</pre>', '').replace('<pre>', '')
             params = dict(title=EVENT_TYPES[event_type][0], message=msg_text)
             if self._use_push_notifier:
-                params.update(target=self._secrets['pb_target'])
                 service = self._push_notifier
+                if 'pushbullet' in service:
+                    params.update(target=self._secrets['pb_target'])
+                if append_extra_data:
+                    if 'url_img1' in last_event:
+                        url_usar = last_event['url_img1']
+                    else:
+                        url_usar = self._secrets['hass_base_url']
+                    if 'ios' in service:
+                        params.update(data=dict(push=dict(badge=1, sound="US-EN-Morgan-Freeman-Motion-Detected.wav",
+                                                          category="ALARMSOUNDED"),
+                                                attachment=dict(url=url_usar)))
+                    elif 'pushbullet' in service:
+                        params.update(data=dict(url=url_usar))
+                # self.log('PUSH TEXT NOTIFICATION "{title}: {message}"'.format(**params))
                 self.log('PUSH TEXT NOTIFICATION "{title}"'.format(**params))
             else:
                 params.update(target=self._secrets['email_target'])
@@ -824,6 +916,7 @@ class MotionAlarm(appapi.AppDaemon):
             self.call_service(service, **params)
 
     def get_events_for_email(self):
+        """Devuelve los eventos acumulados filtrados y ordenados, junto a los paths de las imágenes adjuntadas."""
 
         def _count_included_events(evs):
             """Cuenta los eventos marcados para inclusión."""
@@ -862,14 +955,16 @@ class MotionAlarm(appapi.AppDaemon):
         for event in filter(lambda x: x['incluir'], eventos):
             for i in range(len(self._cameras_jpg_ip)):
                 if event['ok_img{}'.format(i + 1)]:
-                    event['id_img{}'.format(i + 1)] = counter_imgs
+                    # event['id_img{}'.format(i + 1)] = counter_imgs
+                    event['id_img{}'.format(i + 1)] = event['name_img{}'.format(i + 1)]
                     paths_imgs.append(event['path_img{}'.format(i + 1)])
                     counter_imgs += 1
-        self.log('DEBUG: num_included_events={}, counter_imgs={}'.format(num_included_events, counter_imgs))
+        self.log('DEBUG included_events={}, counter_img={}'.format(str(num_included_events), str(counter_imgs)))
         return eventos, paths_imgs, num_included_events
 
     # noinspection PyUnusedLocal
-    def _email_events_data(self, *args):
+    def email_events_data(self, *args):
+        """Envía por email los eventos acumulados."""
         tic = time()
         if self._events_data:
             now = dt.datetime.now(tz=self._tz)
@@ -908,3 +1003,12 @@ class MotionAlarm(appapi.AppDaemon):
             self.call_service(self._email_notifier, **params)
         else:
             self.log('Se solicita enviar eventos, pero no hay ninguno! --> {}'.format(self._events_data), 'ERROR')
+
+    # noinspection PyUnusedLocal
+    def _flash_alarm_lights(self, *args):
+        """Recursive-like method for flashing lights with cycling colors."""
+        if self._alarm_lights is not None:
+            if self._alarm_state:
+                self.call_service("light/turn_on", entity_id=self._alarm_lights,
+                                  rgb_color=next(self._cycle_colors), brightness=255, transition=1)
+                self.run_in(self._flash_alarm_lights, 3)

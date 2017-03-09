@@ -15,8 +15,9 @@ Description=My AppDaemon service for Home Assistant
 [Service]
 # RPI2 - Slave HASS:
 # ExecStart=/srv/homeassistant/bin/appdaemon -c /home/homeassistant/appdaemon_apps/appdaemon_slave.cfg
+# ExecStart=/srv/homeassistant/bin/appdaemon -c /home/homeassistant/appdaemon_apps/appdaemon_slave_mpd.cfg
 # RPI3 - Master HASS:
-ExecStart=/srv/homeassistant/homeassistant_venv/bin/appdaemon -c /home/homeassistant/appdaemon_apps/appdaemon.cfg
+ExecStart=/srv/homeassistant/bin/appdaemon -c /home/homeassistant/appdaemon_apps/appdaemon.cfg
 
 [Install]
 WantedBy=multi-user.target

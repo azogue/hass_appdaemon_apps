@@ -286,11 +286,6 @@ class MotionAlarm(appapi.AppDaemon):
             next_run = self.datetime() + dt.timedelta(seconds=self._raw_sensors_seconds_to_off)
             self.run_every(self._turn_off_raw_sensor_if_not_updated, next_run, self._raw_sensors_seconds_to_off)
 
-        # Listen to main events:
-        self.listen_event(self.receive_init_event, 'ha_started')
-        self.listen_event(self.device_tracker_new_device, 'device_tracker_new_device')
-        self.listen_event(self._reset_alarm_state, 'reset_alarm_state')
-        self.listen_event(self._turn_off_sirena_in_alarm_state, 'silent_alarm_state')
         self._events_data = []
 
         # Main switches:
@@ -328,8 +323,11 @@ class MotionAlarm(appapi.AppDaemon):
             self._cycle_colors = cycle(DEFAULT_ALARM_COLORS)
             self.log('Alarma visual con luces RGB: {}; colores: {}'.format(self._alarm_lights, self._cycle_colors))
 
-        # Notifica inicio
-        self.receive_init_event('inicio_appdaemon', None)
+        # Listen to main events:
+        self.listen_event(self.receive_init_event, 'ha_started')
+        self.listen_event(self.device_tracker_new_device, 'device_tracker_new_device')
+        self.listen_event(self._reset_alarm_state, 'reset_alarm_state')
+        self.listen_event(self._turn_off_sirena_in_alarm_state, 'silent_alarm_state')
 
     def _listconf_param(self, conf_args, param_name, is_secret=False, is_json=False, min_len=None, default=None):
         """Carga de configuración de lista de entidades de HA"""
@@ -619,7 +617,7 @@ class MotionAlarm(appapi.AppDaemon):
         elif entity == self._silent_mode_switch:
             self._silent_mode = new == 'on'
             self.log('SILENT MODE: {}'.format(self._silent_mode))
-            if self._alarm_state and self._silent_mode:
+            if self._alarm_state and self._silent_mode and (self._rele_sirena is not None):
                 self.call_service('{}/turn_off'.format(self._rele_sirena.split('.')[0]), entity_id=self._rele_sirena)
         else:
             self.log('Entity unknown in _main_switch_ch: {} (from {} to {}, attrs={}'
@@ -682,7 +680,8 @@ class MotionAlarm(appapi.AppDaemon):
         if process:
             # apagado de relés de alarma:
             self.log('** Apagado del relé de la sirena de alarma')
-            self.call_service('{}/turn_off'.format(self._rele_sirena.split('.')[0]), entity_id=self._rele_sirena)
+            if self._rele_sirena is not None:
+                self.call_service('{}/turn_off'.format(self._rele_sirena.split('.')[0]), entity_id=self._rele_sirena)
             if self._alarm_lights is not None:
                 self.call_service("light/turn_off", entity_id=self._alarm_lights, transition=1)
 
@@ -752,11 +751,12 @@ class MotionAlarm(appapi.AppDaemon):
                 self._alarm_state_entity_trigger = entity
                 self._alarm_state = True
                 if self._handler_periodic_trigger is None:  # Sólo 1ª vez!
-                    if not self._silent_mode:
+                    if not self._silent_mode and (self._rele_sirena is not None):
                         self.call_service('{}/turn_on'.format(self._rele_sirena.split('.')[0]),
                                           entity_id=self._rele_sirena)
-                    self.call_service('{}/turn_on'.format(self._rele_secundario.split('.')[0]),
-                                      entity_id=self._rele_secundario)
+                    if self._rele_secundario is not None:
+                        self.call_service('{}/turn_on'.format(self._rele_secundario.split('.')[0]),
+                                          entity_id=self._rele_secundario)
                     self.append_event_data(dict(event_type=EVENT_ALARMA, entity_trigger=entity))
                     self.text_notification(append_extra_data=True)
                     self.alarm_persistent_notification()

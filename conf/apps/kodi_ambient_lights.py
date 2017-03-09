@@ -186,10 +186,9 @@ class KodiAssistant(appapi.AppDaemon):
                      .format(old, new, self._is_playing_video), LOG_LEVEL)
             if self._is_playing_video:
                 item_playing = self.get_current_playing_item()
-                new_video = False
-                if (self._item_playing is not None) or (self._item_playing != item_playing):
+                new_video = (self._item_playing is None) or (self._item_playing != item_playing)
+                if new_video:
                     self._item_playing = item_playing
-                    new_video = True
                 now = ha.get_now()
                 if new_video or (self._last_play is None) or (now - self._last_play > dt.timedelta(seconds=30)):
                     self._last_play = now

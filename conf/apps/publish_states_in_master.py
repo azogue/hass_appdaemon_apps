@@ -61,9 +61,9 @@ class SlavePublisher(appapi.AppDaemon):
                 self._raw_sensors_attributes[s] = (s.replace(self._raw_sensors_sufix, ''), self.get_state(s, l1))
                 self._raw_sensors_last_states[s] = [parse(self.get_state(s, l2)).replace(tzinfo=None), False]
                 self.listen_state(self._turn_on_raw_sensor_on_change, s)
-            # self.log('seconds_to_off: {}'.format(self._raw_sensors_seconds_to_off))
-            # self.log('attributes_sensors: {}'.format(self._raw_sensors_attributes))
-            # self.log('last_changes: {}'.format(self._raw_sensors_last_states))
+            self.log('seconds_to_off: {}'.format(self._raw_sensors_seconds_to_off))
+            self.log('attributes_sensors: {}'.format(self._raw_sensors_attributes))
+            self.log('last_changes: {}'.format(self._raw_sensors_last_states))
             # [self.set_state(dev, state='off', attributes=attrs) for dev, attrs in .._raw_sensors_attributes.values()]
             [remote.set_state(self._master_ha_api, dev + self._sufix, 'off', attributes=attrs)
              for dev, attrs in self._raw_sensors_attributes.values()]
@@ -81,7 +81,7 @@ class SlavePublisher(appapi.AppDaemon):
         sensors = dict(**s_states)
         sensors.update(bs_states)
         for entity_id, state_atts in sensors.items():
-            # self.log('SENSOR: {}, ATTRS={}'.format(entity_id, state_atts))
+            self.log('SENSOR: {}, ATTRS={}'.format(entity_id, state_atts))
             # self.log('--> sensor "{}": {}'.format(entity_id, state_atts['state']), level=LOG_LEVEL)
             remote.set_state(self._master_ha_api, entity_id + self._sufix,
                              state_atts['state'], attributes=state_atts['attributes'])

@@ -22,12 +22,14 @@ import requests
 
 
 # Defaults para La Cafetera Alarm Clock:
-DEFAULT_DURATION = 1  # h
+MAX_VOLUME_MOPIDY = 40
+DURATION_VOLUME_RAMP_SEC = 120
+DEFAULT_DURATION = 1.2  # h
 DEFAULT_EMISION_TIME = "08:30:00"
-MAX_WAIT_TIME = dt.timedelta(minutes=15)
-STEP_RETRYING_SEC = 15
-WARM_UP_TIME_DELTA = dt.timedelta(seconds=35)
-MIN_INTERVAL_BETWEEN_EPS = dt.timedelta(hours=6)
+MAX_WAIT_TIME = dt.timedelta(minutes=10)
+STEP_RETRYING_SEC = 20
+WARM_UP_TIME_DELTA = dt.timedelta(seconds=25)
+MIN_INTERVAL_BETWEEN_EPS = dt.timedelta(hours=8)
 MASK_URL_STREAM_MOPIDY = "http://api.spreaker.com/listen/episode/{}/http"
 
 LOG_LEVEL = 'INFO'
@@ -46,8 +48,9 @@ def get_info_last_ep(tz, limit=1):
             episode = data['response']['items'][-1]
             published = parse(episode['published_at']).replace(tzinfo=pytz.UTC).astimezone(tz).replace(tzinfo=None)
             is_live = episode['type'] == 'LIVE'
-            duration = dt.timedelta(hours=DEFAULT_DURATION)
-            if not is_live:
+            if is_live:
+                duration = dt.timedelta(hours=DEFAULT_DURATION)
+            else:
                 duration = dt.timedelta(seconds=episode['duration'] / 1000)
             return True, {'published': published, 'is_live': is_live, 'duration': duration, 'episode': episode}
         return False, data
@@ -63,7 +66,7 @@ def is_last_episode_ready_for_play(now, tz):
     :rtype: tuple(bool, dict)
     """
     est_today = dt.datetime.combine(now.date(), parse(DEFAULT_EMISION_TIME).time())  # .replace(tzinfo=tz)
-    ok, info = get_info_last_ep(tz, 1)
+    ok, info = get_info_last_ep(tz)
     if ok:
         if (info['is_live'] or (now - info['published'] < MIN_INTERVAL_BETWEEN_EPS) or
                 (now + MAX_WAIT_TIME < est_today) or (now - MAX_WAIT_TIME > est_today)):
@@ -104,6 +107,7 @@ class AlarmClock(appapi.AppDaemon):
     after waking up the home-cinema system, or to a Modipy instance running in another RPI"""
 
     _alarm_time_sensor = None
+    _delta_time_postponer_sec = None
     _weekdays_alarm = None
     _notifier = None
     _transit_time = None
@@ -128,12 +132,14 @@ class AlarmClock(appapi.AppDaemon):
     _next_alarm = None
     _handle_alarm = None
     _last_trigger = None
+    _in_alarm_mode = False
 
     def initialize(self):
         """AppDaemon required method for app init."""
         conf_data = dict(self.config['AppDaemon'])
         self._tz = conf.tz
         self._alarm_time_sensor = self.args.get('alarm_time')
+        self._delta_time_postponer_sec = int(self.args.get('postponer_minutos', 9)) * 60
         self.listen_state(self.alarm_time_change, self._alarm_time_sensor)
         self._weekdays_alarm = [_weekday(d) for d in self.args.get('alarmdays', 'mon,tue,wed,thu,fri').split(',')
                                 if _weekday(d) >= 0]
@@ -160,6 +166,9 @@ class AlarmClock(appapi.AppDaemon):
         self._manual_trigger = self.args.get('manual_trigger', None)
         if self._manual_trigger is not None:
             self.listen_state(self.manual_triggering, self._manual_trigger)
+
+        # Listen to ios notification actions:
+        self.listen_event(self.postpone_secuencia_despertador, 'postponer_despertador')
 
         self._lights_alarm = self.args.get('lights_alarm', None)
         self._notifier = conf_data.get('notifier', None)
@@ -191,21 +200,26 @@ class AlarmClock(appapi.AppDaemon):
     # noinspection PyUnusedLocal
     def turn_off_alarm_clock(self, *args):
         """Stop current play when turning off the input_boolean."""
-        if self.play_in_kodi and (self.get_state(entity_id=self._media_player_kodi) == 'playing'):
-            self.call_service('media_player/media_stop', entity_id=self._media_player_kodi)
-            self.call_service('switch/turn_off', entity_id='switch.kodi_tv_salon')
-            if self._manual_trigger is not None:
-                self._last_trigger = dt.datetime.now()
-                self.set_state(entity_id=self._manual_trigger, state='off')
-            self.log('TURN_OFF KODI')
-        elif not self.play_in_kodi and (self.get_state(entity_id=self._media_player_mopidy) == 'playing'):
-            # self.call_service('media_player/media_stop', entity_id=self._media_player_mopidy) # NotImplemented!
-            self.call_service('media_player/turn_off', entity_id=self._media_player_mopidy)
-            self.call_service('switch/turn_off', entity_id="switch.altavoz")
-            if self._manual_trigger is not None:
-                self._last_trigger = dt.datetime.now()
-                self.set_state(entity_id=self._manual_trigger, state='off')
-            self.log('TURN_OFF MOPIDY')
+        if self._in_alarm_mode:
+            if self.play_in_kodi and (self.get_state(entity_id=self._media_player_kodi) == 'playing'):
+                self.call_service('media_player/media_stop', entity_id=self._media_player_kodi)
+                self.call_service('switch/turn_off', entity_id='switch.kodi_tv_salon')
+                if self._manual_trigger is not None:
+                    self._last_trigger = None
+                    self.set_state(entity_id=self._manual_trigger, state='off')
+                self.log('TURN_OFF KODI')
+            elif not self.play_in_kodi:
+                if self.get_state(entity_id=self._media_player_mopidy) == 'playing':
+                    # self.call_service('media_player/media_stop', entity_id=self._media_player_mopidy)  NotImplemented!
+                    self.call_service('media_player/turn_off', entity_id=self._media_player_mopidy)
+                self.call_service('switch/turn_off', entity_id="switch.altavoz")
+                if self._manual_trigger is not None:
+                    self._last_trigger = None
+                    self.set_state(entity_id=self._manual_trigger, state='off')
+                self.log('TURN_OFF MOPIDY')
+        else:
+            self.log('TURN_OFF ALARM CLOCK, BUT ALREADY OFF?')
+        self._in_alarm_mode = False
         # else:
         #     self.log('WTF? TURN_OFF: kodi={}, id_k={}, id_m={}, st_m={}'
         #              .format(self.play_in_kodi, self._media_player_kodi, self._media_player_mopidy,
@@ -217,18 +231,18 @@ class AlarmClock(appapi.AppDaemon):
         self.log('MANUAL_TRIGGERING BOOLEAN CHANGED from {} to {}'.format(old, new))
         # Manual triggering
         if (new == 'on') and ((self._last_trigger is None)
-                              or ((dt.datetime.now() - self._last_trigger).total_seconds() > 60)):
+                              or ((dt.datetime.now() - self._last_trigger).total_seconds() > 30)):
             _ready, ep_info = is_last_episode_ready_for_play(self.datetime(), self._tz)
             self.log('TRIGGER_START with ep_ready, ep_info --> {}, {}'.format(_ready, ep_info))
             if self.play_in_kodi:
-                ok = self.run_kodi_addon_lacafetera(mode='playlast')
+                ok = self.run_kodi_addon_lacafetera()
             else:
                 ok = self.run_mopidy_stream_lacafetera(ep_info)
             # Notification:
             self.call_service(self._notifier.replace('.', '/'), **make_notification_episode(ep_info))
         # Manual stop after at least 15 sec
         elif ((new == 'off') and (old == 'on') and (self._last_trigger is not None) and
-                ((dt.datetime.now() - self._last_trigger).total_seconds() > 15)):
+                ((dt.datetime.now() - self._last_trigger).total_seconds() > 10)):
             # Stop if it's playing
             self.log('TRIGGER_STOP (last trigger at {})'.format(self._last_trigger))
             self.turn_off_alarm_clock()
@@ -252,15 +266,17 @@ class AlarmClock(appapi.AppDaemon):
         self._handle_alarm = self.run_daily(self.run_alarm, self._next_alarm.time())
         self.log('Creating timer for {} --> {}'.format(self._next_alarm, self._handle_alarm), LOG_LEVEL)
 
+    def _set_sunrise_phase(self, *args_runin):
+        self.log('SET_SUNRISE_PHASE: XY={xy_color}, BRIGHT={brightness}, TRANSITION={transition}'
+                 .format(**args_runin[0]))
+        if self._in_alarm_mode:
+            self.call_service('light/turn_on', **args_runin[0])
+        else:
+            self.log('ABORTED SET SUNRISE PHASE')
+
     # noinspection PyUnusedLocal
     def turn_on_lights_as_sunrise(self, *args):
         """Turn on the lights with a sunrise simulation done with multiple transitions."""
-
-        def _set_sunrise_phase(*args_runin):
-            # self.log('SET_SUNRISE_PHASE: XY={xy_color}, BRIGHT={brightness}, TRANSITION={transition}'
-            #          .format(**args_runin[0]))
-            self.call_service('light/turn_on', **args_runin[0])
-
         self.log('RUN_SUNRISE')
         self.call_service('light/turn_off', entity_id=self._lights_alarm, transition=0)
         self.call_service('light/turn_on', entity_id=self._lights_alarm, transition=1,
@@ -269,7 +285,7 @@ class AlarmClock(appapi.AppDaemon):
         for phase in self._phases_sunrise:
             # noinspection PyTypeChecker
             xy_color, brightness = phase['xy_color'], phase['brightness']
-            self.run_in(_set_sunrise_phase, run_in, entity_id=self._lights_alarm,
+            self.run_in(self._set_sunrise_phase, run_in, entity_id=self._lights_alarm,
                         xy_color=xy_color, transition=self._transit_time, brightness=brightness)
             run_in += self._transit_time + 1
 
@@ -284,35 +300,68 @@ class AlarmClock(appapi.AppDaemon):
         r = requests.get(url_base + 'jsonrpc', params=data, auth=auth,
                          headers={'Content-Type': 'application/json'}, timeout=5)
         if r.ok:
+            self._in_alarm_mode = True
             self._last_trigger = dt.datetime.now()
             return True
         self.log('KODI NOT PRESENT? -> {}'.format(r.content), 'ERROR')
         return False
 
+    def run_command_mopidy(self, command='core.tracklist.get_tl_tracks', params=None):
+        """Play stream in mopidy."""
+        url_base = 'http://{}:{}/mopidy/rpc'.format(self._mopidy_ip, self._mopidy_port)
+        headers = {'Content-Type': 'application/json'}
+        payload = {"method": command, "jsonrpc": "2.0", "id": 1}
+        if params is not None:
+            payload.update(params=params)
+        r = requests.post(url_base, headers=headers, data=json.dumps(payload))
+        self.log('DEBUG MOPIDY {} COMMAND RESPONSE? -> {}'.format(command.upper(), r.content.decode()), 'DEBUG')
+        if r.ok:
+            res = json.loads(r.content.decode())
+            if not res['result']:
+                self.error('RUN MOPIDY {} COMMAND BAD RESPONSE? -> {}'.format(command.upper(), r.content.decode()))
+            return res
+        return None
+
+    # noinspection PyUnusedLocal
+    def increase_volume(self, *args):
+        # Todo jugar con volumen y pause/resume en 'postponer'
+        repeat = True
+        if self._in_alarm_mode and self._last_trigger is not None:
+            delta_sec = (dt.datetime.now() - self._last_trigger).total_seconds()
+            if delta_sec > DURATION_VOLUME_RAMP_SEC:
+                volume_set = MAX_VOLUME_MOPIDY
+                repeat = False
+            else:
+                volume_set = int(max(5, (delta_sec / DURATION_VOLUME_RAMP_SEC) * MAX_VOLUME_MOPIDY))
+            self.log('INCREASING MOPIDY VOLUME TO LEVEL {}'.format(volume_set))
+            self.run_command_mopidy('core.mixer.set_volume', params=dict(volume=volume_set))
+        else:
+            repeat = False
+        if repeat:
+            self.run_in(self.increase_volume, 5)
+
     def run_mopidy_stream_lacafetera(self, ep_info):
         """Play stream in mopidy."""
         self.log('RUN_MOPIDY_STREAM_LACAFETERA', LOG_LEVEL)
         self.call_service('switch/turn_on', entity_id="switch.altavoz")
-        url_base = 'http://{}:{}/mopidy/rpc'.format(self._mopidy_ip, self._mopidy_port)
-        url_stream = MASK_URL_STREAM_MOPIDY.format(ep_info['episode']['episode_id'])
-        headers = {'Content-Type': 'application/json'}
-        payload = {"method": "core.tracklist.add", "jsonrpc": "2.0", "id": 1,
-                   "params": {"tracks": None, "at_position": None, "uri": url_stream}}
-        r = requests.post(url_base, headers=headers, data=json.dumps(payload))
-        if r.ok:
-            result = r.text
-            json_res = json.loads(result)
+        self.run_command_mopidy('core.tracklist.clear')
+        params = {"tracks": [{"__model__": "Track",
+                              "uri": MASK_URL_STREAM_MOPIDY.format(ep_info['episode']['episode_id']),
+                              "name": ep_info['episode']['title'],
+                              "date": "{:%Y-%m-%d}".format(ep_info['published'])}]}
+        json_res = self.run_command_mopidy('core.tracklist.add', params=params)
+        if json_res is not None:
             self.log('Added track OK --> {}'.format(json_res))
             if ("result" in json_res) and (len(json_res["result"]) > 0):
                 track_info = json_res["result"][0]
-                payload["method"] = "core.playback.play"
-                payload["params"] = {"tl_track": track_info}
-                r = requests.post(url_base, headers=headers, data=json.dumps(payload))
-                self.log(r.content.decode())
-                if r.ok:
+                self.run_command_mopidy('core.mixer.set_volume', params=dict(volume=5))
+                res_play = self.run_command_mopidy('core.playback.play', params={"tl_track": track_info})
+                if res_play is not None:
+                    self._in_alarm_mode = True
                     self._last_trigger = dt.datetime.now()
+                    self.run_in(self.increase_volume, 5)
                     return True
-        self.log('MOPIDY NOT PRESENT? -> {}'.format(r.content), 'ERROR')
+        self.log('MOPIDY NOT PRESENT??', 'ERROR')
         return False
 
     def prepare_context_alarm(self):
@@ -331,16 +380,15 @@ class AlarmClock(appapi.AppDaemon):
         alarm_ready, alarm_info = is_last_episode_ready_for_play(self.datetime(), self._tz)
         # self.log('is_alarm_ready_to_trigger? {}, info={}'.format(alarm_ready, alarm_info), LOG_LEVEL)
         if alarm_ready:
-            self.turn_on_lights_as_sunrise()
             if self.play_in_kodi:
-                ok = self.run_kodi_addon_lacafetera(mode='playlast')
+                ok = self.run_kodi_addon_lacafetera()
             else:
                 ok = self.run_mopidy_stream_lacafetera(alarm_info)
+            self.turn_on_lights_as_sunrise()
             # Notification:
             self.call_service(self._notifier.replace('.', '/'), **make_notification_episode(alarm_info))
             self.set_state(self._manual_trigger, state='on')
             duration = alarm_info['duration'].total_seconds() if ('duration' in alarm_info) else DEFAULT_DURATION * 3600
-            duration *= 1.1
             self.run_in(self.turn_off_alarm_clock, int(duration))
             self.log('ALARM RUNNING NOW. AUTO STANDBY PROGRAMMED IN {:.0f} SECONDS'.format(duration), LOG_LEVEL)
         else:
@@ -357,6 +405,14 @@ class AlarmClock(appapi.AppDaemon):
         else:
             self.log('ALARM CLOCK NOT TRIGGERED TODAY (weekday={}, alarm weekdays={})'
                      .format(self.datetime().weekday(), self._weekdays_alarm))
+
+    # noinspection PyUnusedLocal
+    def postpone_secuencia_despertador(self, *args):
+        """Botón de postponer alarma X min"""
+        self.turn_off_alarm_clock()
+        self.call_service('light/turn_off', entity_id=self._lights_alarm, transition=1)
+        self.run_in(self.trigger_service_in_alarm, self._delta_time_postponer_sec)
+        self.log('Postponiendo alarma {:.1f} minutos...'.format(self._delta_time_postponer_sec / 60.))
 
 
 # if __name__ == '__main__':

@@ -439,7 +439,7 @@ class MotionAlarm(appapi.AppDaemon):
         base_path = os.path.join(self._path_captures, sub_dir)
         if not os.path.exists(base_path):
             os.mkdir(base_path)
-        url = '{}{}/{}/{}/{}'.format(self._secrets['hass_base_url'], 'local', DIR_CAPTURAS, sub_dir, name)
+        url = '{}/{}/{}/{}/{}'.format(self._secrets['hass_base_url'], 'local', DIR_CAPTURAS, sub_dir, name)
         return name, os.path.join(base_path, name), url
 
     def _append_pic_to_data(self, data, event_type, index, url, params=None):
@@ -974,7 +974,7 @@ class MotionAlarm(appapi.AppDaemon):
             r_name = 'report_{:%Y%m%d_%H%M%S}.html'.format(now)
             last_event = eventos[0]
             color_title = last_event['event_color'] if EVENT_TYPES[last_event['event_type']][2] else HASS_COLOR
-            url_local_path_report = '{}{}/{}/{}'.format(self._secrets['hass_base_url'], 'local', DIR_INFORMES, r_name)
+            url_local_path_report = '{}/{}/{}/{}'.format(self._secrets['hass_base_url'], 'local', DIR_INFORMES, r_name)
             title = EVENT_TYPES[last_event['event_type']][3]
             ts_title = '{:%-d-%-m-%Y}'.format(now.date())
 

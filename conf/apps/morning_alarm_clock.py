@@ -22,8 +22,9 @@ import requests
 
 
 # Defaults para La Cafetera Alarm Clock:
-MAX_VOLUME_MOPIDY = 40
-DURATION_VOLUME_RAMP_SEC = 120
+MIN_VOLUME = 2
+DEFAULT_MAX_VOLUME_MOPIDY = 60
+DEFAULT_DURATION_VOLUME_RAMP = 120
 DEFAULT_DURATION = 1.2  # h
 DEFAULT_EMISION_TIME = "08:30:00"
 MAX_WAIT_TIME = dt.timedelta(minutes=10)
@@ -108,6 +109,8 @@ class AlarmClock(appapi.AppDaemon):
 
     _alarm_time_sensor = None
     _delta_time_postponer_sec = None
+    _max_volume = None
+    _duration_volume_ramp_sec = None
     _weekdays_alarm = None
     _notifier = None
     _transit_time = None
@@ -140,9 +143,12 @@ class AlarmClock(appapi.AppDaemon):
         self._tz = conf.tz
         self._alarm_time_sensor = self.args.get('alarm_time')
         self._delta_time_postponer_sec = int(self.args.get('postponer_minutos', 9)) * 60
-        self.listen_state(self.alarm_time_change, self._alarm_time_sensor)
+        self._max_volume = int(self.args.get('max_volume', DEFAULT_MAX_VOLUME_MOPIDY))
+        self._duration_volume_ramp_sec = int(self.args.get('duration_volume_ramp_sec', DEFAULT_DURATION_VOLUME_RAMP))
         self._weekdays_alarm = [_weekday(d) for d in self.args.get('alarmdays', 'mon,tue,wed,thu,fri').split(',')
                                 if _weekday(d) >= 0]
+        self.listen_state(self.alarm_time_change, self._alarm_time_sensor)
+
         # Room selection:
         self._selected_player = 'KODI'
         self._room_select = self.args.get('room_select', None)
@@ -306,7 +312,7 @@ class AlarmClock(appapi.AppDaemon):
         self.log('KODI NOT PRESENT? -> {}'.format(r.content), 'ERROR')
         return False
 
-    def run_command_mopidy(self, command='core.tracklist.get_tl_tracks', params=None):
+    def run_command_mopidy(self, command='core.tracklist.get_tl_tracks', params=None, check_result=True):
         """Play stream in mopidy."""
         url_base = 'http://{}:{}/mopidy/rpc'.format(self._mopidy_ip, self._mopidy_port)
         headers = {'Content-Type': 'application/json'}
@@ -317,22 +323,21 @@ class AlarmClock(appapi.AppDaemon):
         self.log('DEBUG MOPIDY {} COMMAND RESPONSE? -> {}'.format(command.upper(), r.content.decode()), 'DEBUG')
         if r.ok:
             res = json.loads(r.content.decode())
-            if not res['result']:
+            if check_result and not res['result']:
                 self.error('RUN MOPIDY {} COMMAND BAD RESPONSE? -> {}'.format(command.upper(), r.content.decode()))
             return res
         return None
 
     # noinspection PyUnusedLocal
     def increase_volume(self, *args):
-        # Todo jugar con volumen y pause/resume en 'postponer'
         repeat = True
         if self._in_alarm_mode and self._last_trigger is not None:
             delta_sec = (dt.datetime.now() - self._last_trigger).total_seconds()
-            if delta_sec > DURATION_VOLUME_RAMP_SEC:
-                volume_set = MAX_VOLUME_MOPIDY
+            if delta_sec > self._duration_volume_ramp_sec:
+                volume_set = self._max_volume
                 repeat = False
             else:
-                volume_set = int(max(5, (delta_sec / DURATION_VOLUME_RAMP_SEC) * MAX_VOLUME_MOPIDY))
+                volume_set = int(max(MIN_VOLUME, (delta_sec / self._duration_volume_ramp_sec) * self._max_volume))
             self.log('INCREASING MOPIDY VOLUME TO LEVEL {}'.format(volume_set))
             self.run_command_mopidy('core.mixer.set_volume', params=dict(volume=volume_set))
         else:
@@ -344,7 +349,7 @@ class AlarmClock(appapi.AppDaemon):
         """Play stream in mopidy."""
         self.log('RUN_MOPIDY_STREAM_LACAFETERA', LOG_LEVEL)
         self.call_service('switch/turn_on', entity_id="switch.altavoz")
-        self.run_command_mopidy('core.tracklist.clear')
+        self.run_command_mopidy('core.tracklist.clear', check_result=False)
         params = {"tracks": [{"__model__": "Track",
                               "uri": MASK_URL_STREAM_MOPIDY.format(ep_info['episode']['episode_id']),
                               "name": ep_info['episode']['title'],
@@ -355,7 +360,8 @@ class AlarmClock(appapi.AppDaemon):
             if ("result" in json_res) and (len(json_res["result"]) > 0):
                 track_info = json_res["result"][0]
                 self.run_command_mopidy('core.mixer.set_volume', params=dict(volume=5))
-                res_play = self.run_command_mopidy('core.playback.play', params={"tl_track": track_info})
+                res_play = self.run_command_mopidy('core.playback.play',
+                                                   params={"tl_track": track_info}, check_result=False)
                 if res_play is not None:
                     self._in_alarm_mode = True
                     self._last_trigger = dt.datetime.now()

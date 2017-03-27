@@ -28,6 +28,7 @@ PARAMS_GET_ITEM = {"id": 1, "jsonrpc": "2.0", "method": "Player.GetItem",
                                              "dateadded", "runtime", "starttime", "endtime"]}}
 TYPE_ITEMS_NOTIFY = ['movie', 'episode']
 # TYPE_ITEMS_IGNORE = ['channel', 'unknown']  # grabaciones: 'unknown'
+TELEGRAM_KEYBOARD_KODI = ['/luceson', '/ambilighttoggle, /ambilightconfig', '/pitemps, /tvshowsnext']
 
 
 def _get_max_brightness_ambient_lights():
@@ -53,6 +54,7 @@ class KodiAssistant(appapi.AppDaemon):
     _kodi_auth = None
 
     _notifier = None
+    _notifier_bot = None
 
     _light_states = {}
     _is_playing_video = False
@@ -67,6 +69,7 @@ class KodiAssistant(appapi.AppDaemon):
         conf_data = dict(self.config['AppDaemon'])
         self._media_player = conf_data.get('media_player')
         self._notifier = conf_data.get('notifier').replace('.', '/')
+        self._notifier_bot = conf_data.get('bot_notifier').replace('.', '/')
 
         _kodi_user = conf_data.get('kodi_user')
         _kodi_pass = conf_data.get('kodi_pass')
@@ -108,7 +111,7 @@ class KodiAssistant(appapi.AppDaemon):
             self.log('No current playing item? -> {}'.format(ri.content), 'WARNING')
             return None
 
-    def _make_ios_message(self, item):
+    def _get_kodi_info_params(self, item):
         if item['type'] == 'episode':
             title = "{} S{:02d}E{:02d} {}".format(item['showtitle'], item['season'], item['episode'], item['title'])
         else:
@@ -116,6 +119,7 @@ class KodiAssistant(appapi.AppDaemon):
             if item['year']:
                 title += " [{}]".format(item['year'])
         message = "{}\n∆T: {}.".format(item['plot'], dt.timedelta(hours=item['runtime'] / 3600))
+        img_url = None
         try:
             if 'thumbnail' in item:
                 raw_img_url = item['thumbnail']
@@ -132,12 +136,27 @@ class KodiAssistant(appapi.AppDaemon):
             img_url = parse.unquote_plus(raw_img_url).rstrip('/').lstrip('image://')
             if (self._kodi_ip not in img_url) and img_url.startswith('http://'):
                 img_url = img_url.replace('http:', 'https:')
+            self.log('MESSAGE: T={}, M={}, URL={}'.format(title, message, img_url))
+        except KeyError as e:
+            self.log('MESSAGE KeyError: {}; item={}'.format(e, item))
+        return title, message, img_url
+
+    def _make_ios_message(self, item):
+        title, message, img_url = self._get_kodi_info_params(item)
+        if img_url is not None:
             data_msg = {"title": title, "message": message,
                         "data": {"attachment": {"url": img_url}, "push": {"category": "KODIPLAY"}}}
-            self.log('iOS MESSAGE: {}'.format(data_msg))
-        except KeyError as e:
-            self.log('iOS MESSAGE KeyError: {}; item={}'.format(e, item))
+        else:
             data_msg = {"title": title, "message": message, "data": {"push": {"category": "KODIPLAY"}}}
+        return data_msg
+
+    def _make_telegram_message(self, item):
+        title, message, img_url = self._get_kodi_info_params(item)
+        title = '*{}*'.format(title)
+        if img_url is not None:
+            message += "\n{}\n".format(img_url)
+        data_msg = {"title": title, "message": message,
+                    "data": {"keyboard": TELEGRAM_KEYBOARD_KODI}}
         return data_msg
 
     def _adjust_kodi_lights(self, play=True):
@@ -195,6 +214,7 @@ class KodiAssistant(appapi.AppDaemon):
                     if new_video and (self._item_playing['type'] in TYPE_ITEMS_NOTIFY):
                         # iOS Notification
                         self.call_service(self._notifier, **self._make_ios_message(self._item_playing))
+                        self.call_service(self._notifier_bot, **self._make_telegram_message(self._item_playing))
                         self._adjust_kodi_lights(play=True)
         elif (old == 'playing') and (new == 'idle') and self._is_playing_video:
             self._is_playing_video = False

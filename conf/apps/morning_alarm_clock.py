@@ -21,19 +21,21 @@ import pytz
 import requests
 
 
+LOG_LEVEL = 'INFO'
+
 # Defaults para La Cafetera Alarm Clock:
-MIN_VOLUME = 2
+MIN_VOLUME = 1
 DEFAULT_MAX_VOLUME_MOPIDY = 60
 DEFAULT_DURATION_VOLUME_RAMP = 120
 DEFAULT_DURATION = 1.2  # h
 DEFAULT_EMISION_TIME = "08:30:00"
+DEFAULT_MIN_POSPONER = 9
 MAX_WAIT_TIME = dt.timedelta(minutes=10)
 STEP_RETRYING_SEC = 20
 WARM_UP_TIME_DELTA = dt.timedelta(seconds=25)
 MIN_INTERVAL_BETWEEN_EPS = dt.timedelta(hours=8)
 MASK_URL_STREAM_MOPIDY = "http://api.spreaker.com/listen/episode/{}/http"
-
-LOG_LEVEL = 'INFO'
+TELEGRAM_KEYBOARD_ALARMCLOCK = ['/ducha', '/posponer', '/despertadoroff']
 WEEKDAYS_DICT = {'mon': 0, 'tue': 1, 'wed': 2, 'thu': 3, 'fri': 4, 'sat': 5, 'sun': 6}
 
 
@@ -80,16 +82,32 @@ def is_last_episode_ready_for_play(now, tz):
     return False, None
 
 
-def make_notification_episode(ep_info):
+def _make_notification_episode(ep_info):
     """Crea los datos para la notificación de alarma, con información del episodio de La Cafetera a reproducir."""
     message = ("La Cafetera [{}]: {}\n(Publicado: {})"
                .format(ep_info['episode']['title'], 'LIVE' if ep_info['is_live'] else 'RECORDED', ep_info['published']))
     img_url = ep_info['episode']['image_url']
-    data_msg = {"title": "Comienza el día en positivo!",
-                "message": message,
-                "data": {"push": {"badge": 0, "sound": "US-EN-Morgan-Freeman-Good-Morning.wav",
-                                  "category": "ALARMCLOCK"},
-                         "attachment": {"url": img_url}}}
+    title = "Comienza el día en positivo!"
+    return title, message, img_url
+
+
+def _make_ios_notification_episode(ep_info):
+    """Crea los datos para la notificación de alarma para iOS."""
+    title, message, img_url = _make_notification_episode(ep_info)
+    return {"title": title, "message": message,
+            "data": {"push": {"badge": 0, "sound": "US-EN-Morgan-Freeman-Good-Morning.wav",
+                              "category": "ALARMCLOCK"},
+                     "attachment": {"url": img_url}}}
+
+
+def _make_telegram_notification_episode(ep_info):
+    """Crea los datos para la notificación de alarma para telegram."""
+    title, message, img_url = _make_notification_episode(ep_info)
+    title = '*{}*'.format(title)
+    if img_url is not None:
+        message += "\n{}\n".format(img_url)
+    data_msg = {"title": title, "message": message,
+                "data": {"keyboard": TELEGRAM_KEYBOARD_ALARMCLOCK}}
     return data_msg
 
 
@@ -113,6 +131,7 @@ class AlarmClock(appapi.AppDaemon):
     _duration_volume_ramp_sec = None
     _weekdays_alarm = None
     _notifier = None
+    _notifier_bot = None
     _transit_time = None
     _phases_sunrise = []
     _tz = None
@@ -136,13 +155,14 @@ class AlarmClock(appapi.AppDaemon):
     _handle_alarm = None
     _last_trigger = None
     _in_alarm_mode = False
+    _handler_turnoff = None
 
     def initialize(self):
         """AppDaemon required method for app init."""
         conf_data = dict(self.config['AppDaemon'])
         self._tz = conf.tz
         self._alarm_time_sensor = self.args.get('alarm_time')
-        self._delta_time_postponer_sec = int(self.args.get('postponer_minutos', 9)) * 60
+        self._delta_time_postponer_sec = int(self.args.get('postponer_minutos', DEFAULT_MIN_POSPONER)) * 60
         self._max_volume = int(self.args.get('max_volume', DEFAULT_MAX_VOLUME_MOPIDY))
         self._duration_volume_ramp_sec = int(self.args.get('duration_volume_ramp_sec', DEFAULT_DURATION_VOLUME_RAMP))
         self._weekdays_alarm = [_weekday(d) for d in self.args.get('alarmdays', 'mon,tue,wed,thu,fri').split(',')
@@ -173,11 +193,12 @@ class AlarmClock(appapi.AppDaemon):
         if self._manual_trigger is not None:
             self.listen_state(self.manual_triggering, self._manual_trigger)
 
-        # Listen to ios notification actions:
+        # Listen to ios/telegram notification actions:
         self.listen_event(self.postpone_secuencia_despertador, 'postponer_despertador')
+        self._notifier = conf_data.get('notifier').replace('.', '/')
+        self._notifier_bot = conf_data.get('bot_notifier').replace('.', '/')
 
         self._lights_alarm = self.args.get('lights_alarm', None)
-        self._notifier = conf_data.get('notifier', None)
         total_duration = int(self.args.get('sunrise_duration', 60))
         if not self._phases_sunrise:
             self._phases_sunrise.append({'brightness': 4, 'xy_color': [0.6051, 0.282], 'rgb_color': (62, 16, 17)})
@@ -196,6 +217,11 @@ class AlarmClock(appapi.AppDaemon):
     def play_in_kodi(self):
         """Boolean for select each player (Kodi / Mopidy)."""
         return 'KODI' in self._selected_player.upper()
+
+    def notify_alarmclock(self, ep_info):
+        """Send notification with episode info."""
+        self.call_service(self._notifier_bot.replace('.', '/'), **_make_telegram_notification_episode(ep_info))
+        self.call_service(self._notifier.replace('.', '/'), **_make_ios_notification_episode(ep_info))
 
     # noinspection PyUnusedLocal
     def change_player(self, entity, attribute, old, new, kwargs):
@@ -223,13 +249,13 @@ class AlarmClock(appapi.AppDaemon):
                     self._last_trigger = None
                     self.set_state(entity_id=self._manual_trigger, state='off')
                 self.log('TURN_OFF MOPIDY')
+            if self._handler_turnoff is not None:
+                self.cancel_timer(self._handler_turnoff)
+                self._handler_turnoff = None
         else:
             self.log('TURN_OFF ALARM CLOCK, BUT ALREADY OFF?')
         self._in_alarm_mode = False
-        # else:
-        #     self.log('WTF? TURN_OFF: kodi={}, id_k={}, id_m={}, st_m={}'
-        #              .format(self.play_in_kodi, self._media_player_kodi, self._media_player_mopidy,
-        #                      self.get_state(entity_id=self._media_player_mopidy)))
+        self._handler_turnoff = None
 
     # noinspection PyUnusedLocal
     def manual_triggering(self, entity, attribute, old, new, kwargs):
@@ -245,8 +271,8 @@ class AlarmClock(appapi.AppDaemon):
             else:
                 ok = self.run_mopidy_stream_lacafetera(ep_info)
             # Notification:
-            self.call_service(self._notifier.replace('.', '/'), **make_notification_episode(ep_info))
-        # Manual stop after at least 15 sec
+            self.notify_alarmclock(ep_info)
+        # Manual stop after at least 10 sec
         elif ((new == 'off') and (old == 'on') and (self._last_trigger is not None) and
                 ((dt.datetime.now() - self._last_trigger).total_seconds() > 10)):
             # Stop if it's playing
@@ -384,7 +410,6 @@ class AlarmClock(appapi.AppDaemon):
         """Launch alarm secuence if ready, or set itself to retry in the short future."""
         # Check if alarm is ready to launch
         alarm_ready, alarm_info = is_last_episode_ready_for_play(self.datetime(), self._tz)
-        # self.log('is_alarm_ready_to_trigger? {}, info={}'.format(alarm_ready, alarm_info), LOG_LEVEL)
         if alarm_ready:
             if self.play_in_kodi:
                 ok = self.run_kodi_addon_lacafetera()
@@ -392,10 +417,10 @@ class AlarmClock(appapi.AppDaemon):
                 ok = self.run_mopidy_stream_lacafetera(alarm_info)
             self.turn_on_lights_as_sunrise()
             # Notification:
-            self.call_service(self._notifier.replace('.', '/'), **make_notification_episode(alarm_info))
+            self.notify_alarmclock(alarm_info)
             self.set_state(self._manual_trigger, state='on')
             duration = alarm_info['duration'].total_seconds() if ('duration' in alarm_info) else DEFAULT_DURATION * 3600
-            self.run_in(self.turn_off_alarm_clock, int(duration))
+            self._handler_turnoff = self.run_in(self.turn_off_alarm_clock, int(duration))
             self.log('ALARM RUNNING NOW. AUTO STANDBY PROGRAMMED IN {:.0f} SECONDS'.format(duration), LOG_LEVEL)
         else:
             self.log('POSTPONE ALARM', LOG_LEVEL)

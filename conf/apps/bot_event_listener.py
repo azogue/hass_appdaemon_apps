@@ -15,7 +15,7 @@ import paramiko
 import subprocess
 from random import randrange
 import re
-from time import time, sleep
+from time import time
 
 
 LOG_LEVEL = 'INFO'
@@ -61,11 +61,62 @@ NOTIF_MASK_LAST_VALIDATION = "Validación a las {:%d/%m/%y %H:%M:%S}, " \
 ##################################################
 # Telegram commands & HASS wizard
 ##################################################
+TELEGRAM_BOT_HELP = '''*Comandos disponibles*:
+/start - Muestra el mensaje de bienvenida y un teclado con comandos de ejemplo.
+/init - Ejecuta la misma acción que /start.
+/hasswiz - Inicia el asistente para interactuar con Home Assistant.
+/status - Devuelve información actual de los sensores de la casa.
+/hastatus - Devuelve información sobre el funcionamiento de Home Assistant.
+/getcams - Devuelve instantáneas de las cámaras de la casa.
+/template - Render del texto pasado como argumentos.
+/html - Render del texto pasado usando el parser HTML.
+/enerpi - Muestra información general sobre el consumo eléctrico actual.
+/enerpifact - IMPLEMENTAR
+/enerpitiles - Gráficas de 24h del sensor enerPI.
+/enerpikwh - Gráfica de 24h del consumo eléctrico en kWh y € de factura.
+/enerpipower - Muestra la gráfica de 24h de la potencia eléctrica.
+/armado - Activar la alarma.
+/vigilancia - Activar modo de vigilancia simple.
+/lucesoff - Apagar las luces de casa.
+/llegada - Apagar la alarma y encender las luces.
+/llegadatv - Apagar la alarma y encender las luces y la tele.
+/ignorar - Resetear el estado de alarma.
+/silenciar - Silenciar la sirena de alarma.
+/resetalarm - Ignorar el armado de alarma y resetearla.
+/desconectar - Desconectar la alarma.
+/confirmar - Validar.
+/luceson - Luces del salón al 100%.
+/ambilighttoggle - Cambio del modo Ambilight (encender/apagar).
+/ambilightconfig - Cambio de la configuración de Ambilight.
+/ducha - Luces de dormitorio en 'Energy' y encendido del calefactor.
+/posponer - Posponer despertador unos minutos más.
+/despertadoroff - Luces de dormitorio en 'Energy'.
+/pitemps - Muestra la temperatura de la RPI.
+/cathass - Muestra el LOG de Home Assistant.
+/catappd - Muestra el LOG de AppDaemon.
+/catappderr - Muestra el LOG de errores de AppDaemon.
+/shell - Ejecuta un comando en el shell del host de HA (RPI3).
+/osmc - Ejecuta un comando en el shell de la RPI3 del Salón.
+/osmcmail - Muestra el syslog de la máquina OSMC.
+/rpi2 - Ejecuta un comando en el shell de la RPI2 del dormitorio.
+/rpi2h - Ejecuta un comando en el shell de la RPI2 del Estudio.
+/rpi - Ejecuta un comando en el shell de la RPI de Galería.
+/tvshowscron - Muestra la tabla CRON del TvShows Downloader.
+/tvshowsinfo - Muestra información sobre la serie pasada como argumento.
+/tvshowsdd - Descarga de capítulos: '/tvshowsdd game of thrones s02e10'.
+/tvshowsnext - Muestra los capítulos de series de próxima emisión.
+/help - Muestra la descripción de los comandos disponibles.'''
+# /confirmar - Validar.
+# /yes': 'CAM_YES',  # Validar
+# /no': 'CAM_NO',  # Validar
+# /input': 'INPUTORDER'}  # Tell me ('textInput')
+
 TELEGRAM_SHELL_CMDS = ['/shell', '/osmc', '/osmcmail', '/rpi2', '/rpi2h',
                        '/rpi', '/pitemps',
                        '/cathass', '/catappd', '/catappderr', '/tvshowscron',
                        '/tvshowsinfo', '/tvshowsdd', '/tvshowsnext']
-TELEGRAM_HASS_CMDS = ['/getcams', '/status', '/html', '/template',
+TELEGRAM_HASS_CMDS = ['/getcams', '/status', '/hastatus', '/html', '/template',
+                      '/help', '/start',
                       '/enerpi', '/enerpifact', '/enerpitiles',
                       '/enerpikwh', '/enerpipower', '/init', '/hasswiz']
 TELEGRAM_IOS_COMMANDS = {  # AWAY category
@@ -101,8 +152,10 @@ TELEGRAM_INLINE_KEYBOARD = [
     [('ARMADO', '/armado'), ('Apaga las luces', '/lucesoff')],
     [('Llegada', '/llegada'), ('Llegada con TV', '/llegadatv')],
     [('Enciende luces', '/luceson'), ('Ambilight', '/ambilighttoggle')],
-    [('Estado general', '/status'), ('LOG', '/catappd'), ('CAMS', '/getcams')],
-    [('Home assistant wizard!', '/hasswiz')]
+    [('Estado general', '/status'), ('HA status', '/hastatus')],
+    [('LOG HA', '/cathass'), ('LOG', '/catappd'), ('LOG ERR', '/catappderr')],
+    [('ENERGY', '/enerpi'), ('CAMS', '/getcams')],
+    [('Home assistant wizard!', '/hasswiz'), ('Ayuda', '/help')]
 ]
 TELEGRAM_UNKNOWN = [
     'Cachis, no te he entendido eso de *{}*',
@@ -115,11 +168,13 @@ TELEGRAM_UNKNOWN = [
     "Sorry, I can't understand this: *{}*"
 ]
 
-TELEGRAM_KEYBOARD = ['/armado, /lucesoff', '/llegada, /llegadatv',
+TELEGRAM_KEYBOARD = ['/armado, /lucesoff',
+                     '/llegada, /llegadatv',
                      '/luceson, /ambilighttoggle',
-                     '/status, /catappd, /getcams',
+                     '/cathass, /catappd, /catappderr',
+                     '/enerpi, /enerpitiles, /getcams',
+                     '/status, /hastatus, /help'
                      '/hasswiz, /init']
-
 TELEGRAM_INLINE_KEYBOARD_ENERPI = [
     [('Apaga luces', '/lucesoff'), ('Enciende luces', '/luceson')],
     [('Potencia eléctrica', '/enerpi'), ('Consumo 24h', '/enerpikwh')],
@@ -246,93 +301,18 @@ CMD_STATUS_TEMPL_ESP32 = '''*ESP8266*:
 - Tª: {{states.sensor.esp1_temperature.state}} ºC
 - HR: {{states.sensor.esp1_humidity.state}} %'''
 
-# '''*Switchs*:
-# {% for state in states.switch%}
-# - {{state.attributes.friendly_name}} --> {{state.state}} [{{relative_time(state.last_changed)}}]{% endfor %}
-#
-# *Binary sensors*:
-# {% for state in states.binary_sensor%}
-# - {{state.attributes.friendly_name}} [{{state.attributes.device_class}}] --> {{state.state}} [{{relative_time(state.last_changed)}}]{% endfor %}
-#
-# *Sensors*:
-# {% for state in states.sensor%}
-# - {{state.attributes.friendly_name}} --> {{state.state}} [{{relative_time(state.last_changed)}}]{% endfor %}
-#
-# *Lights*:
-# {% for state in states.light%}
-# - {{state.attributes.friendly_name}} --> {{state.state}} [{{relative_time(state.last_changed)}}]{% endfor %}
-#
-#
-# *Switchs*:
-# {% for state in states.switch%}
-# - {{state.attributes.entity_id}} --> {{state.state}} [{{relative_time(state.last_changed)}}]{% endfor %}
-#
-# *Binary sensors*:
-# {% for state in states.binary_sensor%}
-# - {{state.entity_id}} [{{state.attributes.device_class}}] --> {{state.state}} [{{relative_time(state.last_changed)}}]{% endfor %}
-#
-# *Sensors*:
-# {% for state in states.sensor%}
-# - {{state.entity_id}} --> {{state.state}} [{{relative_time(state.last_changed)}}]{% endfor %}
-#
-# *Lights*:
-# {% for state in states.light%}
-# - {{state.entity_id}} --> {{state.state}} [{{relative_time(state.last_changed)}}]{% endfor %}
-#
-
-#
-#
-# - switch.systemd_appdaemon --> on [1 hour]
-# - switch.systemd_homebridge --> on [1 hour]
-# - switch.toggle_config_kodi_ambilight --> on [1 hour]
-#
-# *Binary sensors*:
-#
-# - binary_sensor.email_online [connectivity] --> on [1 hour]
-# - binary_sensor.internet_online [connectivity] --> on [1 hour]
-# - binary_sensor.ios_online [connectivity] --> on [1 hour]
-# - binary_sensor.kodi_online [connectivity] --> on [1 hour]
-#
-# - binary_sensor.pushbullet_online [connectivity] --> on [1 hour]
-# - binary_sensor.router_on [connectivity] --> on [1 hour]
-# - binary_sensor.services_notok [safety] --> off [1 hour]
-# - binary_sensor.telegram_online [connectivity] --> on [1 hour]
-#
-# *Sensors*:
-#
-# - sensor.alarm_clock_hour --> 8 [1 hour]
-# - sensor.alarm_clock_minute --> 0 [1 hour]
-#
-# - sensor.cpu_use --> 3 [27 seconds]
-# - sensor.cpu_use_rpi2h --> 4 [16 seconds]
-# - sensor.cpu_use_rpi2mpd --> 2 [1 minute]
-#
-# - sensor.disk_use_home --> 30.0 [59 minutes]
-# - sensor.error_counter_notifiers --> 0 [1 hour]
-#
-#
-# - sensor.ip_externa --> 185.97.169.163 [1 hour]
-# - sensor.iphone_battery_level --> 74 [1 hour]
-# - sensor.iphone_battery_state --> Unplugged [1 hour]
-# - sensor.last_boot --> 2017-03-24 [1 hour]
-# - sensor.ram_free --> 654.7 [27 seconds]
-# - sensor.ram_free_rpi2h --> 393.2 [47 seconds]
-# - sensor.ram_free_rpi2mpd --> 594.3 [1 second]
-#
-# - sensor.speedtest_download --> 46.81 [11 minutes]
-# - sensor.speedtest_ping --> 19.21 [11 minutes]
-# - sensor.speedtest_upload --> 9.14 [11 minutes]
-#
-# - sensor.villena_cloud_coverage --> 20 [1 hour]
-# - sensor.villena_condition --> few clouds [1 hour]
-# - sensor.villena_forecast --> Clouds [1 hour]
-# - sensor.villena_humidity --> 50 [58 minutes]
-# - sensor.villena_pressure --> 1013 [1 hour]
-# - sensor.villena_rain --> not raining [1 hour]
-# - sensor.villena_temperature --> 14.0 [1 hour]
-# - sensor.villena_wind_speed --> 2.6 [8 seconds]
-# - sensor.warning_counter_core --> 0 [1 hour]
-# - sensor.yr_symbol --> 2 [1 hour]
+CMD_TEMPL_HASS_STATUS = '''*HASS Status*:
+*¿Problemas? -> {{states.binary_sensor.services_notok.state}}* ({{relative_time(states.binary_sensor.services_notok.last_changed)}})
+- IP: {{states.sensor.ip_externa.state}}
+- Internet: *{{states.binary_sensor.internet_online.state}}*, Router: {{states.binary_sensor.router_on.state}}, DL {{states.sensor.speedtest_download.state|int}} Mbps / UL {{states.sensor.speedtest_upload.state|int}} Mbps / ping {{states.sensor.speedtest_ping.state|int}}ms
+Servicios:
+- AppDaemon: *{{states.switch.systemd_appdaemon.state}}* ({{relative_time(states.switch.systemd_appdaemon.last_changed)}})
+- Homebridge: *{{states.switch.systemd_homebridge.state}}* ({{relative_time(states.switch.systemd_homebridge.last_changed)}})
+- Notify: Telegram {{states.binary_sensor.telegram_online.state}}, iOS {{states.binary_sensor.ios_online.state}}, Pushbullet {{states.binary_sensor.pushbullet_online.state}}, email {{states.binary_sensor.email_online.state}}, Kodi {{states.binary_sensor.kodi_online.state}}.
+Funcionando desde {{states.sensor.last_boot.state}} (HASS {{relative_time(states.sensor.last_boot.last_changed)}}). CPU al {{states.sensor.cpu_use.state}} %, RAM FREE {{states.sensor.ram_free.state}} MB, SD al {{states.sensor.disk_use_home.state}} %.
+- {{states.sensor.error_counter_notifiers.state}} warnings de notificación.
+- {{states.sensor.warning_counter_core.state}} core warnings.
+- {{states.sensor.core_error_counter.state}} core errors.'''
 
 # Custom shell script for capture a pic from a HASS camera:
 CMD_MAKE_HASS_PIC = '/home/homeassistant/.homeassistant/shell/capture_pic.sh ' \
@@ -356,7 +336,7 @@ class EventListener(appapi.AppDaemon):
     _lights_notif_st_attr = None
     _notifier = None
     _bot_notifier = None
-    _bot_hasswiz_stack = None
+    _bot_wizstack = None
     _bot_chatids = None
     _bot_users = None
 
@@ -379,7 +359,7 @@ class EventListener(appapi.AppDaemon):
         self._bot_chatids = _chatids
         self._bot_users = {c: u for c, u in zip(self._bot_chatids, _nicknames)}
         self._lights_notif = self.args.get('lights_notif', 'light.cuenco')
-        self._bot_hasswiz_stack = []
+        self._bot_wizstack = {user: [] for user in self._bot_users.keys()}
 
         # iOS app notification actions
         [self.listen_event(self.receive_ios_event, ev)
@@ -534,7 +514,7 @@ class EventListener(appapi.AppDaemon):
         else:  # shell cmd
             return self._shell_command_output(args, timeout=timeout, **kwargs)
 
-    def _exec_bot_hass_command(self, command, cmd_args, user_id):
+    def _bot_hass_command(self, command, cmd_args, user_id):
         # TODO + comandos, fuzzy logic con cmd + args, etc...
         prefix = 'WTF CMD {}'.format(command)
         msg = {'message': "ERROR {} - {}".format(command, cmd_args),
@@ -544,15 +524,20 @@ class EventListener(appapi.AppDaemon):
                        message=HASSWIZ_STEPS[0]['question'],
                        target=user_id,
                        data=dict(inline_keyboard=HASSWIZ_STEPS[0]['options']))
-            self.log('HASS WIZARD START')
             prefix = 'START HASS WIZARD'
-        elif command == '/init':  # Welcome message & keyboards:
-            prefix = 'START HASS WIZARD'
+        elif command == '/help':
+            # Welcome message & keyboards:
+            prefix = 'SHOW BOT HELP'
+            msg = dict(target=user_id, message=TELEGRAM_BOT_HELP,
+                       data=dict(inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
+                                 disable_notification=False))
+        elif (command == '/init') or (command == '/start'):
+            # Welcome message & keyboards:
+            prefix = 'BOT START'
             msg = dict(target=user_id,
                        message='_Say something to me_, *my master*',
                        data=dict(inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
                                  disable_notification=False))
-            self.log('HASS WIZARD START"')
         elif command == '/status':
             # multiple messaging:
             msg = dict(title=CMD_STATUS_TITLE, message=CMD_STATUS_TEMPL_SALON,
@@ -576,10 +561,15 @@ class EventListener(appapi.AppDaemon):
             self.call_service(self._bot_notifier, **msg)
             msg['message'] = CMD_STATUS_TEMPL_ENERPI
             msg['data'] = dict(inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
-                               target=user_id,
                                disable_notification=False)
             # self.call_service(self._bot_notifier, **msg)
             prefix = 'SHOW HASS STATUS'
+        elif command == '/hastatus':
+            msg = dict(message=CMD_TEMPL_HASS_STATUS,
+                       target=user_id,
+                       data=dict(inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
+                                 disable_notification=False))
+            prefix = 'SHOW HASS PROCESS STATUS'
         elif command == '/html':
             msg = dict(data=dict(parse_mode='html', keyboard=TELEGRAM_KEYBOARD),
                        message=cmd_args, target=user_id)
@@ -614,7 +604,6 @@ class EventListener(appapi.AppDaemon):
                 static_url = self._gen_hass_cam_pics(cam)
                 photos.append({'url': static_url, 'caption': cap})
             if len(photos) > 1:
-                self.log('FOTOS: {}'.format(photos))
                 first = photos[:-1]
                 photos = [photos[-1]]
                 msg = {'message': "ENERPI CAMERAS", "target": user_id,
@@ -668,33 +657,40 @@ class EventListener(appapi.AppDaemon):
     def alarm_mode_controller_master_switch(self, entity, attribute,
                                             old, new, kwargs):
         """Cambia el input_select cuando se utiliza el master switch"""
-        self.log('ALARM_MODE_CONTROLLER_MASTER_SWITCH {} -> {}'.format(old, new))
+        self.log('ALARM_MODE_CONTROLLER_MASTER_SWITCH {} -> {}'
+                 .format(old, new))
         selected_mode = self.get_state('input_select.alarm_mode')
         if new == 'on':
             self._alarm_state = True
             if selected_mode == 'Desconectada':
-                self.select_option("input_select.alarm_mode", option="Fuera de casa")
+                self.select_option("input_select.alarm_mode",
+                                   option="Fuera de casa")
         elif new == 'off':
             self._alarm_state = False
             if selected_mode != 'Desconectada':
-                self.select_option("input_select.alarm_mode", option="Desconectada")
+                self.select_option("input_select.alarm_mode",
+                                   option="Desconectada")
 
     def _alguien_mas_en_casa(self, entity_exclude='no_excluir_nada'):
-        res = any([x[0] == 'home' for k, x in self._tracking_state.items() if k != entity_exclude])
+        res = any([x[0] == 'home' for k, x in self._tracking_state.items()
+                   if k != entity_exclude])
         if self._alarm_state:
-            self.log('alguien_mas_en_casa? -> {}. De {}, excl={}'.format(res, self._tracking_state, entity_exclude))
+            self.log('alguien_mas_en_casa? -> {}. De {}, excl={}'
+                     .format(res, self._tracking_state, entity_exclude))
         return res
 
     # noinspection PyUnusedLocal
     def track_zone_ch(self, entity, attribute, old, new, kwargs):
         last_st, last_ch = self._tracking_state[entity]
         self._tracking_state[entity] = [new, self.datetime()]
+        clean_ent = entity.lstrip('device_tracker.')
         if last_st != old:
-            self.log('TRACKING_STATE_CHANGE "{}" from "{}" [!="{}", changed at {}] to "{}"'
-                     .format(entity.lstrip('device_tracker.'), old, last_st, last_ch, new))
+            self.log('TRACKING_STATE_CHANGE "{}" from "{}" [!="{}"'
+                     ', changed at {}] to "{}"'
+                     .format(clean_ent, old, last_st, last_ch, new))
         else:
             self.log('TRACKING_STATE_CHANGE "{}" from "{}" [{}] to "{}"'
-                     .format(entity.lstrip('device_tracker.'), old, last_ch, new))
+                     .format(clean_ent, old, last_ch, new))
             if (new == 'home') and not self._alguien_mas_en_casa():
                 # Llegada a casa:
                 # if self._alarm_state:
@@ -704,7 +700,8 @@ class EventListener(appapi.AppDaemon):
                                               "category": "INHOME"}}}
                 self.log('INHOME NOTIF: {}'.format(data_msg))
                 self.call_service(self._notifier, **data_msg)
-            elif (old == 'home') and not self._alguien_mas_en_casa() and not self._alarm_state:
+            elif ((old == 'home') and not self._alguien_mas_en_casa()
+                  and not self._alarm_state):
                 # Salida de casa:
                 data_msg = {"title": "Vuelve pronto!",
                             "message": "¿Apagamos luces o encendemos alarma?",
@@ -776,9 +773,8 @@ class EventListener(appapi.AppDaemon):
             self.log('NOTIFICATION WTF: "{}", payload={}, otherArgs={}'
                      .format(event_id, payload_event, args))
 
-    # noinspection PyUnusedLocal
-    def process_telegram_response(self, command, cmd_args,
-                                  user_id, callback_id=None):
+    def process_telegram_command(self, command, cmd_args,
+                                 user_id, callback_id=None):
         tic = time()
         if callback_id is not None:
             msg = dict(data=dict(callback_query=dict(
@@ -815,8 +811,7 @@ class EventListener(appapi.AppDaemon):
                 self.log('DEBUG: USING CALLBACK {} w/msg={}'
                          .format(callback_id, msg['message']))
             self.call_service(self._bot_notifier, **msg)
-            prefix, msg = self._exec_bot_hass_command(command, cmd_args,
-                                                      user_id)
+            prefix, msg = self._bot_hass_command(command, cmd_args, user_id)
             self.log('{} TOOK {:.3f}s'.format(prefix, time() - tic))
             self.call_service(self._bot_notifier, **msg)
         else:
@@ -834,36 +829,36 @@ class EventListener(appapi.AppDaemon):
         option = data_callback[len(COMMAND_WIZARD_OPTION):]
         data_msg = dict(callback_query=dict(callback_query_id=callback_id))
         if option == 'reset':
-            self._bot_hasswiz_stack = []
+            self._bot_wizstack[user_id] = []
             self.log('HASSWIZ RESET')
             self.call_service(self._bot_notifier, data=data_msg,
                               target=user_id,
                               message="Reset wizard, start again")
         elif option == 'back':
-            self._bot_hasswiz_stack = self._bot_hasswiz_stack[:-1]
-            message = "Back to: {}".format(self._bot_hasswiz_stack)
-            self.log('HASSWIZ BACK --> {}'.format(self._bot_hasswiz_stack))
+            self._bot_wizstack[user_id] = self._bot_wizstack[user_id][:-1]
+            message = "Back to: {}".format(self._bot_wizstack[user_id])
+            self.log('HASSWIZ BACK --> {}'.format(self._bot_wizstack[user_id]))
             self.call_service(self._bot_notifier, data=data_msg,
                               target=user_id, message=message)
         elif option == 'exit':
-            self._bot_hasswiz_stack = []
+            self._bot_wizstack[user_id] = []
             self.log('HASSWIZ EXIT')
             self.call_service(self._bot_notifier, data=data_msg,
                               target=user_id, message="Bye bye...")
             return self._notify_bot_menu(user_id)
         else:
-            self._bot_hasswiz_stack.append(option)
-            if len(self._bot_hasswiz_stack) == len(HASSWIZ_STEPS):
+            self._bot_wizstack[user_id].append(option)
+            if len(self._bot_wizstack[user_id]) == len(HASSWIZ_STEPS):
                 # Try to exec command:
-                service, operation, entity_id = self._bot_hasswiz_stack
-                self._bot_hasswiz_stack.pop()
+                service, operation, entity_id = self._bot_wizstack[user_id]
+                self._bot_wizstack[user_id].pop()
                 entity = '{}.{}'.format(service, entity_id)
                 # CALLING SERVICE / GET STATES
                 if (service in ['switch', 'light', 'input_boolean']) and (operation in ['turn_on', 'turn_off']):
                     message = "Service called: {}/{}/{}"
                     message = message.format(_clean(service), _clean(operation), _clean(entity_id))
                     self.log('HASSWIZ: CALLING SERVICE "{}". Stack: {}'
-                             .format(message, self._bot_hasswiz_stack))
+                             .format(message, self._bot_wizstack[user_id]))
                     self.call_service('{}/{}'.format(service, operation),
                                       entity_id=entity)
                     self.call_service(self._bot_notifier, data=data_msg,
@@ -895,27 +890,29 @@ class EventListener(appapi.AppDaemon):
                                   message="Option selected: {}".format(option))
         # Show next wizard step
         try:
-            wiz_step = HASSWIZ_STEPS[len(self._bot_hasswiz_stack)]
+            wiz_step = HASSWIZ_STEPS[len(self._bot_wizstack[user_id])]
         except IndexError:
             self.log('HASS WIZ INDEX ERROR: stack={}, max={}. Reseting stack'
-                     .format(len(self._bot_hasswiz_stack), len(HASSWIZ_STEPS)))
-            self._bot_hasswiz_stack = []
+                     .format(len(self._bot_wizstack[user_id]),
+                             len(HASSWIZ_STEPS)))
+            self._bot_wizstack[user_id] = []
             wiz_step = HASSWIZ_STEPS[0]
         wiz_step_text = wiz_step['question']
-        if ('{}' in wiz_step_text) and self._bot_hasswiz_stack:
+        if ('{}' in wiz_step_text) and self._bot_wizstack[user_id]:
             wiz_step_text = wiz_step_text.format(
-                '/'.join(self._bot_hasswiz_stack))
+                '/'.join(self._bot_wizstack[user_id]))
+
         wiz_step_inline_kb = wiz_step['options']
         if wiz_step_inline_kb is None:
             # Get options from HASS, filtering with stack opts
             d_entities_options = self._hass_entities[
-                self._bot_hasswiz_stack[0]]
+                self._bot_wizstack[user_id][0]]
             wiz_step_inline_kb = []
             wiz_step_inline_kb_row = []
             for i, (key, fn) in enumerate(d_entities_options.items()):
-                btn = (fn, 'op:{}'.format(key))
+                btn = (fn, '{}{}'.format(COMMAND_WIZARD_OPTION, key))
                 wiz_step_inline_kb_row.append(btn)
-                if (i > 0) and (i % 3 == 0):
+                if i % 3 == 2:
                     wiz_step_inline_kb.append(wiz_step_inline_kb_row)
                     wiz_step_inline_kb_row = []
             if wiz_step_inline_kb_row:
@@ -923,27 +920,28 @@ class EventListener(appapi.AppDaemon):
             wiz_step_inline_kb.append(HASSWIZ_MENU_ACTIONS)
 
         msg_id = msg_origin['message_id']
-        # Edición de mensaje:
+        # # Edición de teclado -> no necesaria
+        # self.call_service(self._bot_notifier, message=wiz_step_text,
+        #                   target=user_id,
+        #                   data=dict(edit_replymarkup=dict(message_id=msg_id),
+        #                             inline_keyboard=wiz_step_inline_kb))
+        # Edición de mensaje y de teclado:
         self.call_service(self._bot_notifier, message=wiz_step_text,
                           target=user_id,
-                          data=dict(edit_message=dict(message_id=msg_id)))
-        # Edición de teclado:
-        self.call_service(self._bot_notifier, message=wiz_step_text,
-                          target=user_id,
-                          data=dict(edit_replymarkup=dict(message_id=msg_id),
+                          data=dict(edit_message=dict(message_id=msg_id),
                                     inline_keyboard=wiz_step_inline_kb))
         return True
 
     # noinspection PyUnusedLocal
     def receive_telegram_event(self, event_id, payload_event, *args):
-        """Event listener."""
+        """Event listener for Telegram events."""
         self.log('TELEGRAM NOTIFICATION: "{}", payload={}'
                  .format(event_id, payload_event))
         user_id = payload_event['user_id']
         if event_id == 'telegram_command':
             command = payload_event['command']
             cmd_args = payload_event['args'] or ''
-            self.process_telegram_response(command, cmd_args, user_id)
+            self.process_telegram_command(command, cmd_args, user_id)
         elif event_id == 'telegram_text':
             text = payload_event['text']
             msg = 'TEXT RECEIVED: ```\n{}\n```'.format(text)
@@ -956,13 +954,6 @@ class EventListener(appapi.AppDaemon):
             callback_id = payload_event['id']
             callback_chat_instance = payload_event['chat_instance']
 
-            # 1ºs notif
-            d_data = dict(callback_query=dict(callback_query_id=callback_id,
-                                              show_alert=False))
-            self.call_service(self._bot_notifier, target=user_id,
-                              message="I'm on it, my master", data=d_data)
-            sleep(3)
-
             # Tipo de pulsación (wizard vs simple command):
             if data_callback.startswith(COMMAND_PREFIX):  # exec simple command
                 cmd = data_callback.split(' ')
@@ -970,8 +961,8 @@ class EventListener(appapi.AppDaemon):
                 self.log('CALLBACK REDIRECT TO COMMAND RESPONSE: '
                          'cmd="{}", args="{}", callback_id={}'
                          .format(command, cmd_args, callback_id))
-                self.process_telegram_response(command, cmd_args, user_id,
-                                               callback_id=callback_id)
+                self.process_telegram_command(command, cmd_args, user_id,
+                                              callback_id=callback_id)
             elif data_callback.startswith(COMMAND_WIZARD_OPTION):  # Wizard
                 return self.process_telegram_wizard(msg_origin, data_callback,
                                                     user_id, callback_id)
@@ -984,21 +975,16 @@ class EventListener(appapi.AppDaemon):
                                   data=dict(keyboard=TELEGRAM_KEYBOARD),
                                   message=rand_msg_mask.format(data_callback))
 
-            # last notif
-            sleep(3)
-            d_data = dict(callback_query=dict(callback_query_id=callback_id,
-                                              show_alert=False))
-            self.call_service(self._bot_notifier, target=user_id,
-                              message="I'm DONE, my master", data=d_data)
-
     def frontend_notif(self, action_name, msg_origin, mask=DEFAULT_NOTIF_MASK,
                        title=None, raw_data=None):
         """Set a persistent_notification in frontend."""
         if raw_data is not None:
-            message = mask.format(dt.datetime.now(tz=conf.tz), msg_origin, raw_data)
+            message = mask.format(dt.datetime.now(tz=conf.tz),
+                                  msg_origin, raw_data)
         else:
             message = mask.format(dt.datetime.now(tz=conf.tz), msg_origin)
-        self.persistent_notification(message, title=action_name if title is None else title, id=action_name)
+        title = action_name if title is None else title
+        self.persistent_notification(message, title=title, id=action_name)
 
     def _turn_off_lights_and_appliances(self, turn_off_heater=False):
         self.turn_off('group.all_lights', transition=2)
@@ -1009,163 +995,166 @@ class EventListener(appapi.AppDaemon):
         if turn_off_heater:
             self.turn_off("switch.caldera")
 
-    def response_to_action(self, action_name, origin, telegram_target=None):
+    def response_to_action(self, action, origin, telegram_target=None):
         """Respond to defined action events."""
-        prefix = '*iOS Action "{}" received. ' if not telegram_target else '*Action {}* received: '
-
+        if telegram_target is None:
+            action_msg_log = '*iOS Action "{}" received. '.format(action)
+        else:
+            action_msg_log = '*Action {}* received: '.format(action)
         # AWAY category
-        if action_name == 'ALARM_ARM_NOW':  # Activar alarma
-            self.frontend_notif(action_name, origin, mask=NOTIF_MASK_ALARM_ON,
+        if action == 'ALARM_ARM_NOW':  # Activar alarma
+            self.frontend_notif(action, origin, mask=NOTIF_MASK_ALARM_ON,
                                 title='Activación remota de alarma')
             self._turn_off_lights_and_appliances()
-            self.select_option("input_select.alarm_mode", option="Fuera de casa")
-            action_msg_log = (prefix + 'ALARM ON, MODE "Fuera de casa"').format(action_name)
-        elif action_name == 'ALARM_HOME':  # Activar vigilancia
-            self.frontend_notif(action_name, origin, mask=NOTIF_MASK_ALARM_HOME,
+            self.select_option("input_select.alarm_mode",
+                               option="Fuera de casa")
+            action_msg_log += 'ALARM ON, MODE "Fuera de casa"'
+        elif action == 'ALARM_HOME':  # Activar vigilancia
+            self.frontend_notif(action, origin, mask=NOTIF_MASK_ALARM_HOME,
                                 title='Activación remota de vigilancia')
             self._turn_off_lights_and_appliances()
             self.select_option("input_select.alarm_mode", option="En casa")
-            action_msg_log = (prefix + 'ALARM MODE "En casa"').format(action_name)
-        elif action_name == 'LIGHTS_OFF':  # Apagar luces
+            action_msg_log += 'ALARM MODE "En casa"'
+        elif action == 'LIGHTS_OFF':  # Apagar luces
             self._turn_off_lights_and_appliances()
-            self.frontend_notif(action_name, origin, mask=NOTIF_MASK_LIGHTS_OFF,
+            self.frontend_notif(action, origin, mask=NOTIF_MASK_LIGHTS_OFF,
                                 title='Apagado de luces')
-            action_msg_log = (prefix + 'APAGANDO LUCES').format(action_name)
+            action_msg_log += 'APAGANDO LUCES'
 
         # INHOME category
-        elif action_name == 'WELCOME_HOME':  # Alarm OFF, lights ON
+        elif action == 'WELCOME_HOME':  # Alarm OFF, lights ON
             self.select_option("input_select.alarm_mode", option="Desconectada")
             self.turn_on("switch.cocina")
             self.call_service('light/hue_activate_scene',
                               group_name="Salón", scene_name='Semáforo')
-            self.frontend_notif(action_name, origin, mask=NOTIF_MASK_ALARM_OFF,
+            self.frontend_notif(action, origin, mask=NOTIF_MASK_ALARM_OFF,
                                 title='Llegando a casa, luces ON')
-            action_msg_log = (prefix + 'ALARM OFF. Kitchen ON, "Semáforo"("Salón")').format(action_name)
+            action_msg_log += 'ALARM OFF. Kitchen ON, "Semáforo"("Salón")'
             self.light_flash(XY_COLORS['green'], persistence=2, n_flashes=2)
-        elif action_name == 'WELCOME_HOME_TV':  # Alarm OFF, lights ON
+        elif action == 'WELCOME_HOME_TV':  # Alarm OFF, lights ON
             self.select_option("input_select.alarm_mode", option="Desconectada")
             self.turn_on("switch.kodi_tv_salon")
             self.call_service('light/hue_activate_scene',
                               group_name="Salón", scene_name='Aurora boreal')
-            self.frontend_notif(action_name, origin, mask=NOTIF_MASK_ALARM_OFF,
+            self.frontend_notif(action, origin, mask=NOTIF_MASK_ALARM_OFF,
                                 title='Llegando a casa, tele ON')
-            action_msg_log = (prefix + 'ALARM OFF. TV ON, "Aurora boreal"("Salón")').format(action_name)
+            action_msg_log += 'ALARM OFF. TV ON, "Aurora boreal"("Salón")'
             self.light_flash(XY_COLORS['green'], persistence=2, n_flashes=2)
-        elif action_name == 'IGNORE_HOME':  # Reset del estado de alarma
+        elif action == 'IGNORE_HOME':  # Reset del estado de alarma
             self.fire_event('reset_alarm_state')
-            self.frontend_notif(action_name, origin,
+            self.frontend_notif(action, origin,
                                 mask=NOTIF_MASK_ALARM_RESET,
                                 title='Ignorando presencia')
-            action_msg_log = (prefix + 'reset_alarm_state & alarm continues ON').format(action_name)
+            action_msg_log += 'reset_alarm_state & alarm continues ON'
 
-        elif action_name == 'ALARM_SILENT':  # Silenciar alarma (sólo la sirena)
-            self.frontend_notif(action_name, origin,
+        elif action == 'ALARM_SILENT':  # Silenciar alarma (sólo la sirena)
+            self.frontend_notif(action, origin,
                                 mask=NOTIF_MASK_ALARM_SILENT,
                                 title="Sirena OFF")
             self.fire_event('silent_alarm_state')
-            action_msg_log = (prefix + 'SIRENA OFF').format(action_name)
-        elif action_name == 'ALARM_RESET':  # Ignorar armado y resetear
+            action_msg_log += 'SIRENA OFF'
+        elif action == 'ALARM_RESET':  # Ignorar armado y resetear
             self.fire_event('reset_alarm_state')
-            self.frontend_notif(action_name, origin,
+            self.frontend_notif(action, origin,
                                 mask=NOTIF_MASK_ALARM_RESET,
                                 title="Ignorando presencia")
-            action_msg_log = (prefix + 'reset_alarm_state & alarm continues ON').format(action_name)
-        elif action_name == 'ALARM_CANCEL':  # Desconectar alarma
-            self.frontend_notif(action_name, origin,
+            action_msg_log += 'reset_alarm_state & alarm continues ON'
+        elif action == 'ALARM_CANCEL':  # Desconectar alarma
+            self.frontend_notif(action, origin,
                                 mask=NOTIF_MASK_ALARM_OFF,
                                 title="Desconexión de Alarma")
             self.select_option("input_select.alarm_mode", option="Desconectada")
-            action_msg_log = (prefix + 'ALARM MODE OFF').format(action_name)
+            action_msg_log += 'ALARM MODE OFF'
             self.light_flash(XY_COLORS['green'], persistence=2, n_flashes=5)
 
         # CONFIRM category
-        elif action_name == 'CONFIRM_OK':  # Validar
-            self.frontend_notif(action_name, origin,
+        elif action == 'CONFIRM_OK':  # Validar
+            self.frontend_notif(action, origin,
                                 mask=NOTIF_MASK_LAST_VALIDATION,
                                 title="Validación")
-            action_msg_log = 'Confirmation received [{}]'.format(action_name)
+            action_msg_log += 'Confirmation received'
             self.light_flash(XY_COLORS['yellow'], persistence=3, n_flashes=1)
 
         # CAMERA category
-        elif action_name == 'CAM_YES':  # Validar
-            self.frontend_notif(action_name, origin)
-            action_msg_log = (prefix + 'GREEN FLASHING').format(action_name)
+        elif action == 'CAM_YES':  # Validar
+            self.frontend_notif(action, origin)
+            action_msg_log += 'GREEN FLASHING'
             self.light_flash(XY_COLORS['green'], persistence=3, n_flashes=1)
-        elif action_name == 'CAM_NO':  # Validar
-            self.frontend_notif(action_name, origin)
-            action_msg_log = (prefix + 'RED FLASHING').format(action_name)
+        elif action == 'CAM_NO':  # Validar
+            self.frontend_notif(action, origin)
+            action_msg_log += 'RED FLASHING'
             self.light_flash(XY_COLORS['red'], persistence=3, n_flashes=1)
 
         # KODIPLAY category
-        elif action_name == 'LIGHTS_ON':  # Lights ON!
-            self.frontend_notif(action_name, origin,
+        elif action == 'LIGHTS_ON':  # Lights ON!
+            self.frontend_notif(action, origin,
                                 mask=NOTIF_MASK_LIGHTS_ON, title="Lights ON!")
             self.call_service('input_slider/select_value',
                               entity_id="input_slider.light_main_slider_salon",
                               value=254)
-            action_msg_log = (prefix + 'LIGHTS ON: LIGHT MAIN SLIDER SALON 254').format(action_name)
-        elif action_name == 'HYPERION_TOGGLE':  # Toggle Ambilight
-            self.frontend_notif(action_name, origin,
+            action_msg_log += 'LIGHTS ON: LIGHT MAIN SLIDER SALON 254'
+        elif action == 'HYPERION_TOGGLE':  # Toggle Ambilight
+            self.frontend_notif(action, origin,
                                 mask=NOTIF_MASK_TOGGLE_AMB,
                                 title="Toggle Ambilight")
             self.toggle("switch.toggle_kodi_ambilight")
-            action_msg_log = (prefix + 'TOGGLE KODI AMBILIGHT').format(action_name)
+            action_msg_log += 'TOGGLE KODI AMBILIGHT'
             self.light_flash(XY_COLORS['blue'], persistence=2, n_flashes=2)
-        elif action_name == 'HYPERION_CHANGE':  # Change Ambilight conf
-            self.frontend_notif(action_name, origin,
+        elif action == 'HYPERION_CHANGE':  # Change Ambilight conf
+            self.frontend_notif(action, origin,
                                 mask=NOTIF_MASK_TOGGLE_AMB_CONF,
                                 title="Cambio de modo Ambilight")
             self.toggle("switch.toggle_config_kodi_ambilight")
-            action_msg_log = (prefix + 'CHANGE AMBILIGHT CONF').format(action_name)
+            action_msg_log += 'CHANGE AMBILIGHT CONF'
             self.light_flash(XY_COLORS['violet'], persistence=2, n_flashes=2)
 
         # ALARMCLOCK category
-        elif action_name == 'INIT_DAY':  # Luces Energy + Calefactor!
-            self.frontend_notif(action_name, origin, mask=NOTIF_MASK_INIT_DAY)
+        elif action == 'INIT_DAY':  # Luces Energy + Calefactor!
+            self.frontend_notif(action, origin, mask=NOTIF_MASK_INIT_DAY)
             self.call_service('light/hue_activate_scene',
                               group_name="Dormitorio", scene_name='Energía')
             self.turn_on('switch.calefactor')
-            action_msg_log = (prefix + 'A NEW DAY STARTS WITH A WARM SHOWER').format(action_name)
-        elif action_name == 'POSTPONE_ALARMCLOCK':  # Postponer despertador
-            self.frontend_notif(action_name, origin,
+            action_msg_log += 'A NEW DAY STARTS WITH A WARM SHOWER'
+        elif action == 'POSTPONE_ALARMCLOCK':  # Postponer despertador
+            self.frontend_notif(action, origin,
                                 mask=NOTIF_MASK_POSTPONE_ALARMCLOCK,
                                 title="Posponer despertador")
             self.turn_off('input_boolean.manual_trigger_lacafetera')
-            action_msg_log = (prefix + 'Dormilón!').format(action_name)
+            action_msg_log += 'Dormilón!'
             self.fire_event("postponer_despertador", jam="true")
-        elif action_name == 'ALARMCLOCK_OFF':  # Luces Energy
-            self.frontend_notif(action_name, origin,
+        elif action == 'ALARMCLOCK_OFF':  # Luces Energy
+            self.frontend_notif(action, origin,
                                 mask=NOTIF_MASK_ALARMCLOCK_OFF,
                                 title="Despertador apagado")
             self.turn_off('input_boolean.manual_trigger_lacafetera')
-            action_msg_log = (prefix + 'Apagado de alarma').format(action_name)
+            action_msg_log += 'Apagado de alarma'
 
-        # TODO replace/demove/debug EXECORDER iOS category with textInput not working!
-        elif action_name == 'INPUTORDER':  # Tell me ('textInput')
-            self.frontend_notif(action_name, origin)
-            action_msg_log = (prefix + 'INPUT: {}').format(action_name, origin)
+        # TODO replace/remove EXECORDER iOS category with textInput not working!
+        elif action == 'INPUTORDER':  # Tell me ('textInput')
+            self.frontend_notif(action, origin)
+            action_msg_log += 'INPUT: {}'.format(origin)
             self.light_flash(XY_COLORS['blue'], persistence=3, n_flashes=1)
         # Unrecognized cat
         else:
-            action_msg_log = (prefix + 'WTF: origin={}').format(action_name, origin)
-            self.frontend_notif(action_name, origin)
+            action_msg_log += 'WTF: origin={}'.format(origin)
+            self.frontend_notif(action, origin)
 
         self.log(action_msg_log)
-        if telegram_target is not None:
-            # edit the caption notification:
-            # msg = dict(target=telegram_target[0],
-            #            message='It is done, my master\n{}'.format(action_msg_log),
-            #            data=dict(edit_caption=dict(caption='It is done OK: {}'.format(action_msg_log),
-            #                                        inline_message_id=msg_origin['message_id'])))
-            #
-            # msg = dict(target=telegram_target[0],
-            #            message='It is done, my master\n{}'.format(action_msg_log),
-            #            data=dict(edit_caption=dict(caption='It is done OK: {}'.format(action_msg_log),
-            #                                        inline_message_id=msg_origin['message_id'])))
-
-            self.call_service(self._bot_notifier, target=telegram_target[0],
-                              message='It is done, my master\n{}'.format(action_msg_log),
-                              data=dict(callback_query=dict(callback_query_id=telegram_target[1], show_alert=True)))
+        # if telegram_target is not None:
+        #     # edit the caption notification:
+        #     # msg = dict(target=telegram_target[0],
+        #     #            message='It is done, my master\n{}'.format(action_msg_log),
+        #     #            data=dict(edit_caption=dict(caption='It is done OK: {}'.format(action_msg_log),
+        #     #                                        inline_message_id=msg_origin['message_id'])))
+        #     #
+        #     # msg = dict(target=telegram_target[0],
+        #     #            message='It is done, my master\n{}'.format(action_msg_log),
+        #     #            data=dict(edit_caption=dict(caption='It is done OK: {}'.format(action_msg_log),
+        #     #                                        inline_message_id=msg_origin['message_id'])))
+        #
+        #     self.call_service(self._bot_notifier, target=telegram_target[0],
+        #                       message='It is done, my master\n{}'.format(action_msg_log),
+        #                       data=dict(callback_query=dict(callback_query_id=telegram_target[1], show_alert=True)))
 
     # debug
     def _test_notification_actions(self):

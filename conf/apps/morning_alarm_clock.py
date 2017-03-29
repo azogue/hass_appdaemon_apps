@@ -300,7 +300,7 @@ class AlarmClock(appapi.AppDaemon):
 
     def _set_sunrise_phase(self, *args_runin):
         self.log('SET_SUNRISE_PHASE: XY={xy_color}, BRIGHT={brightness}, TRANSITION={transition}'
-                 .format(**args_runin[0]))
+                 .format(**args_runin[0]), 'DEBUG')
         if self._in_alarm_mode:
             self.call_service('light/turn_on', **args_runin[0])
         else:
@@ -364,12 +364,12 @@ class AlarmClock(appapi.AppDaemon):
                 repeat = False
             else:
                 volume_set = int(max(MIN_VOLUME, (delta_sec / self._duration_volume_ramp_sec) * self._max_volume))
-            self.log('INCREASING MOPIDY VOLUME TO LEVEL {}'.format(volume_set))
+            self.log('INCREASING MOPIDY VOLUME TO LEVEL {}'.format(volume_set), 'DEBUG')
             self.run_command_mopidy('core.mixer.set_volume', params=dict(volume=volume_set))
         else:
             repeat = False
         if repeat:
-            self.run_in(self.increase_volume, 5)
+            self.run_in(self.increase_volume, 10)
 
     def run_mopidy_stream_lacafetera(self, ep_info):
         """Play stream in mopidy."""

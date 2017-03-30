@@ -27,6 +27,16 @@ XY_COLORS = {"red": [0.6736, 0.3221], "blue": [0.1684, 0.0416],
              "orange": [0.5825, 0.3901], "yellow": [0.4925, 0.4833],
              "green": [0.4084, 0.5168], "violet": [0.3425, 0.1383]}
 RG_COLOR = re.compile('(\\x1b\[\d{1,2}m)')
+RG_TVS_DF = re.compile('^(?P<ts>\d{4}-\d{2}-\d{2})\s+(?P<tvshow>.+?)\s+'
+                       '(?P<season>\d{1,2})\s+(?P<ep_number>\d{1,2})\s+'
+                       '(?P<title>.+?)\s+(?P<first_aired>\d{4}-\d{2}-\d{2})$')
+rg_cron_common = '(?P<command>.+[^\n])"\nnº execs this year: ' \
+                 '(?P<num_year>\d{1,4})\nNEXT: (?P<next_time>\d{2}:\d{2})\s' \
+                 '(?P<next_date>\d{2}-\d{2}-\d{4})\s+?PREV: ' \
+                 '(?P<prev_time>\d{2}:\d{2})\s(?P<prev_date>\d{2}-\d{2}-\d{4})'
+RG_CRON_JOB_REBOOT = re.compile('\*\* JOB: "@reboot ' + rg_cron_common)
+RG_CRON_JOB = re.compile('\*\* JOB: "(?P<p1>[^@]+?)\s(?P<p2>\S+)\s(?P<p3>\S+)'
+                         '\s(?P<p4>\S+)\s(?P<p5>\S+)\s' + rg_cron_common)
 
 ##################################################
 # Text templates (persistent notifications)
@@ -225,9 +235,11 @@ SSH_PYTHON_ENVS_PREFIX = {
              "/home/{0}/.pyenv/shims/",
     'rpi2': "/bin/bash /home/{0}/.bashrc;"
              "export PYTHONPATH=$PYTHONPATH:/home/{0}/PYTHON/;"
-             "source /home/{0}/PYTHON/py35/bin/activate"
-             "export PYTHONPATH=$PYTHONPATH:/home/{0}/PYTHON/:"
-             "/home/{0}/PYTHON/py35/lib/python3.5/site-packages"
+             "source /home/{0}/PYTHON/py35/bin/activate;"
+             "/home/{0}/PYTHON/py35/bin/",
+    'rpi3w': "/bin/bash /home/{0}/.bashrc;"
+             "export PYTHONPATH=$PYTHONPATH:/home/{0}/PYTHON/;"
+             "source /home/{0}/PYTHON/py35/bin/activate;"
              "/home/{0}/PYTHON/py35/bin/"
 }
 
@@ -408,6 +420,10 @@ class EventListener(appapi.AppDaemon):
         return True
 
     def _ssh_command_output(self, user, host, command, timeout=10):
+        """Exec a ssh command in a remote host.
+
+        Returns ok, render, filtered_stdout
+        """
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(host, username=user, key_filename=PATH_SSH_KEY)
@@ -416,24 +432,28 @@ class EventListener(appapi.AppDaemon):
         if not out:
             out = stderr.read().decode()[:-1]
             self.log('SSH ERROR: {}'.format(out))
-            return False, RG_COLOR.sub('', out)
-        return True, RG_COLOR.sub('', out)
+            return False, False, RG_COLOR.sub('', out)
+        return True, False, RG_COLOR.sub('', out)
 
     def _shell_command_output(self, cmd, timeout=10, **kwargs):
+        """Exec a shell command in a subprocess and capture output.
+
+        Returns ok, render, filtered_stdout
+        """
         popenargs = cmd.split() if ' ' in cmd else cmd
         try:
             out = subprocess.check_output(popenargs, timeout=timeout,
                                           stderr=subprocess.STDOUT,
                                           **kwargs).decode()
-            return True, RG_COLOR.sub('', out)
+            return True, False, RG_COLOR.sub('', out)
         except subprocess.CalledProcessError as e:
             self.log('CalledProcessError with {} -> {}, [{}]'
                      .format(cmd, e, e.__class__))
-            return False, e.output.decode()
+            return False, False, e.output.decode()
         except Exception as e:
             clean_e = str(e).replace('[', '(').replace(']', ')')
             msg = 'CHECK_OUTPUT ERROR: {} {}'.format(clean_e, e.__class__)
-            return False, msg
+            return False, False, msg
 
     def _gen_hass_cam_pics(self, cam_entity_id):
         """curl -s
@@ -445,8 +465,9 @@ class EventListener(appapi.AppDaemon):
                                                   cam_entity_id)
         cmd = CMD_MAKE_HASS_PIC.format(hass_pw=self._config['ha_key'],
                                        img_url=img_url, cam_filename=file)
-        ok, _ = self._shell_command_output(cmd, timeout=5)
-        self.log('HASS CAM PIC {} -> {}:{}'.format(cam_entity_id, file, ok))
+        ok, _, _ = self._shell_command_output(cmd, timeout=5)
+        if not ok:
+            self.log('HASS CAM BAD PIC {} -> {}'.format(cam_entity_id, file))
         static_url = '{}/local/snapshot_cameras/{}'.format(
             self._config['base_url'], file)
         return static_url
@@ -458,46 +479,75 @@ class EventListener(appapi.AppDaemon):
             user, host = 'osmc', 'rpi3osmc'
             cmd = SSH_PYTHON_ENVS_PREFIX[host].format(user)
             cmd += "python /home/osmc/PYTHON/cronify"
-            return self._ssh_command_output(user, host, cmd, timeout=timeout)
+            ok, render, out = self._ssh_command_output(user, host, cmd, timeout)
+            if ok:  # pretty print
+                pp_out = '*{}*\n'.format(out.splitlines()[0])
+                render = True
+                pp_out += '\n'.join(
+                    ['- `{}`\n  --> NEXT *{} {}* (last: {} {})\n'.format(
+                        f[5], f[8], f[7], f[10], f[9])
+                     for f in RG_CRON_JOB.findall(out)]) + '\n'
+                reboot_found = '\n'.join(['- `{}`\n'.format(
+                    f[0]) for f in RG_CRON_JOB_REBOOT.findall(out)])
+                if reboot_found:
+                    pp_out += 'Reboot JOBS:\n{}\n'.format(reboot_found)
+                return ok, render, pp_out
+            return ok, render, out
         elif command == '/tvshowsnext':
             user, host = 'osmc', 'rpi3osmc'
             cmd = SSH_PYTHON_ENVS_PREFIX[host].format(user)
             cmd += "python /home/osmc/PYTHON/tvshows --next"
-            return self._ssh_command_output(user, host, cmd, timeout=40)
+            ok, render, out = self._ssh_command_output(user, host, cmd, 40)
+            if ok:  # pretty print
+                pp_out = '*{}*\n'.format(out.splitlines()[0])
+                render = True
+                for l in out.splitlines():
+                    found = RG_TVS_DF.findall(l)
+                    if found:
+                        found = list(found[0])
+                        found[2], found[3] = int(found[2]), int(found[3])
+                        pp_out += '_{}_ *{} S{:02d}E{:02d}* {}\n'.format(*found)
+                return ok, render, pp_out
+            return ok, render, out
         elif command == '/tvshowsinfo':
             user, host = 'osmc', 'rpi3osmc'
             cmd = SSH_PYTHON_ENVS_PREFIX[host].format(user)
             cmd += "python /home/osmc/PYTHON/tvshows -i " + args
-            return self._ssh_command_output(user, host, cmd, timeout=600)
+            return self._ssh_command_output(user, host, cmd, 600)
         elif command == '/tvshowsdd':
             user, host = 'osmc', 'rpi3osmc'
             cmd = SSH_PYTHON_ENVS_PREFIX[host].format(user)
             cmd += "python /home/osmc/PYTHON/tvshows -dd " + args
-            return self._ssh_command_output(user, host, cmd, timeout=600)
+            return self._ssh_command_output(user, host, cmd, 600)
         elif command == '/osmc':
             user, host = 'osmc', 'rpi3osmc'
             if args.startswith('python'):
-                args = SSH_PYTHON_ENVS_PREFIX[host].format(user) + args[6:]
-            return self._ssh_command_output(user, host, args, timeout=timeout)
+                args = SSH_PYTHON_ENVS_PREFIX[host].format(user) + args
+            return self._ssh_command_output(user, host, args, timeout)
         elif command == '/osmcmail':
             user, host = 'osmc', 'rpi3osmc'
             cmd = 'tail -n 100 /var/mail/osmc'
-            return self._ssh_command_output(user, host, cmd, timeout=timeout)
+            return self._ssh_command_output(user, host, cmd, timeout)
+        elif (command == '/rpi3') or (command == '/rpi3w'):
+            user, host = 'pi', 'rpi3w'
+            if args.startswith('python'):
+                args = SSH_PYTHON_ENVS_PREFIX[host].format(user) + args
+            return self._ssh_command_output(user, host, args, timeout)
         elif command == '/rpi2':
             user, host = 'pi', 'rpi2'
             if args.startswith('python'):
-                args = SSH_PYTHON_ENVS_PREFIX[host].format(user) + args[6:]
-            return self._ssh_command_output(user, host, args, timeout=timeout)
+                args = SSH_PYTHON_ENVS_PREFIX[host].format(user) + args
+            return self._ssh_command_output(user, host, args, timeout)
         elif command == '/rpi2h':
             user, host = 'pi', 'rpi2h'
             if args.startswith('python'):
-                args = SSH_PYTHON_ENVS_PREFIX[host].format(user) + args[6:]
-            return self._ssh_command_output(user, host, args, timeout=timeout)
+                args = SSH_PYTHON_ENVS_PREFIX[host].format(user) + args
+            return self._ssh_command_output(user, host, args, timeout)
         elif command == '/rpi':
             user, host = 'pi', 'rpi'
             if args.startswith('python'):
-                args = SSH_PYTHON_ENVS_PREFIX[host].format(user) + args[6:]
-            return self._ssh_command_output(user, host, args, timeout=timeout)
+                args = SSH_PYTHON_ENVS_PREFIX[host].format(user) + args
+            return self._ssh_command_output(user, host, args, timeout)
         elif command == '/pitemps':
             cmd = 'python3 /home/pi/pitemps.py'
             return self._shell_command_output(cmd, timeout=timeout, **kwargs)
@@ -796,20 +846,22 @@ class EventListener(appapi.AppDaemon):
             if callback_id is not None:
                 msg['message'] = msg['message'].replace('_', '')
             self.call_service(self._bot_notifier, **msg)
-            ok, out = self._exec_bot_shell_command(command, cmd_args)
+            ok, render, out = self._exec_bot_shell_command(command, cmd_args)
             if len(out) > 4000:
                 out = out[-4000:]
-            self.log('SHELL CMD TOOK {:.3f}s'.format(time() - tic))
+            self.log('SHELL CMD TOOK {:.3f}s -> {} {}'
+                     .format(time() - tic, command, cmd_args))
             title = '*SHELL CMD OK*\n' if ok else '*SHELL CMD ERROR!*:\n'
-            message = "```\n{}\n```".format(out.replace('```', ''))
+            if ok and render:
+                message = "\n{}\n".format(out)
+            else:
+                message = "```\n{}\n```".format(out.replace('```', ''))
             self.call_service(self._bot_notifier, title=title, target=user_id,
                               message=message)
         elif command in TELEGRAM_HASS_CMDS:
             msg["message"] = '_Running_: {}'.format(command)
             if callback_id is not None:
                 msg['message'] = msg['message'].replace('_', '')
-                self.log('DEBUG: USING CALLBACK {} w/msg={}'
-                         .format(callback_id, msg['message']))
             self.call_service(self._bot_notifier, **msg)
             prefix, msg = self._bot_hass_command(command, cmd_args, user_id)
             self.log('{} TOOK {:.3f}s'.format(prefix, time() - tic))
@@ -936,7 +988,7 @@ class EventListener(appapi.AppDaemon):
     def receive_telegram_event(self, event_id, payload_event, *args):
         """Event listener for Telegram events."""
         self.log('TELEGRAM NOTIFICATION: "{}", payload={}'
-                 .format(event_id, payload_event))
+                 .format(event_id, payload_event), 'DEBUG')
         user_id = payload_event['user_id']
         if event_id == 'telegram_command':
             command = payload_event['command']
@@ -945,7 +997,7 @@ class EventListener(appapi.AppDaemon):
         elif event_id == 'telegram_text':
             text = payload_event['text']
             msg = 'TEXT RECEIVED: ```\n{}\n```'.format(text)
-            self.log('TELEGRAM TEXT: ' + text)
+            self.log('TELEGRAM TEXT: ' + str(text))
             self.call_service(self._bot_notifier, target=user_id, message=msg)
         else:
             assert event_id == 'telegram_callback'
@@ -960,7 +1012,7 @@ class EventListener(appapi.AppDaemon):
                 command, cmd_args = cmd[0], cmd[1:]
                 self.log('CALLBACK REDIRECT TO COMMAND RESPONSE: '
                          'cmd="{}", args="{}", callback_id={}'
-                         .format(command, cmd_args, callback_id))
+                         .format(command, cmd_args, callback_id), 'DEBUG')
                 self.process_telegram_command(command, cmd_args, user_id,
                                               callback_id=callback_id)
             elif data_callback.startswith(COMMAND_WIZARD_OPTION):  # Wizard

@@ -153,7 +153,8 @@ class EnerpiPeakNotifier(appapi.AppDaemon):
     def _make_ios_message(self, reset_alarm=False):
         data_msg = self._get_notif_data(reset_alarm)
         if reset_alarm:
-            data_msg["data"] = {"push": {"category": "camera", "badge": 0}, "entity_id": self._camera}
+            data_msg["data"] = {"push": {"category": "camera", "badge": 0},
+                                "entity_id": self._camera}
         else:
             data_msg["data"] = {"push": {"category": "camera", "badge": 1,
                                          "sound": "US-EN-Morgan-Freeman-Vacate-The-Premises.wav"},
@@ -162,7 +163,8 @@ class EnerpiPeakNotifier(appapi.AppDaemon):
 
     def _make_telegram_message(self, reset_alarm=False):
         data_msg = self._get_notif_data(reset_alarm)
-        data_msg["data"] = {"keyboard": ['/luceson, /lucesoff', '/pitemps, /status']}
+        data_msg["data"] = {"keyboard": ['/luceson, /lucesoff',
+                                         '/pitemps, /status', '/init']}
         return data_msg
 
     # noinspection PyUnusedLocal

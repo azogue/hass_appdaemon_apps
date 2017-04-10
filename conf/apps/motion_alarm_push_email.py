@@ -955,11 +955,9 @@ class MotionAlarm(appapi.AppDaemon):
         for event in filter(lambda x: x['incluir'], eventos):
             for i in range(len(self._cameras_jpg_ip)):
                 if event['ok_img{}'.format(i + 1)]:
-                    # event['id_img{}'.format(i + 1)] = counter_imgs
                     event['id_img{}'.format(i + 1)] = event['name_img{}'.format(i + 1)]
                     paths_imgs.append(event['path_img{}'.format(i + 1)])
                     counter_imgs += 1
-        self.log('DEBUG included_events={}, counter_img={}'.format(str(num_included_events), str(counter_imgs)))
         return eventos, paths_imgs, num_included_events
 
     # noinspection PyUnusedLocal

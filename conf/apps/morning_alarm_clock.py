@@ -35,7 +35,7 @@ STEP_RETRYING_SEC = 20
 WARM_UP_TIME_DELTA = dt.timedelta(seconds=25)
 MIN_INTERVAL_BETWEEN_EPS = dt.timedelta(hours=8)
 MASK_URL_STREAM_MOPIDY = "http://api.spreaker.com/listen/episode/{}/http"
-TELEGRAM_KEYBOARD_ALARMCLOCK = ['/ducha', '/posponer', '/despertadoroff']
+TELEGRAM_KEYBOARD_ALARMCLOCK = ['/ducha', '/posponer', '/despertadoroff', '/hasswiz, /init']
 WEEKDAYS_DICT = {'mon': 0, 'tue': 1, 'wed': 2, 'thu': 3, 'fri': 4, 'sat': 5, 'sun': 6}
 
 
@@ -107,7 +107,8 @@ def _make_telegram_notification_episode(ep_info):
     if img_url is not None:
         message += "\n{}\n".format(img_url)
     data_msg = {"title": title, "message": message,
-                "data": {"keyboard": TELEGRAM_KEYBOARD_ALARMCLOCK}}
+                "data": {"keyboard": TELEGRAM_KEYBOARD_ALARMCLOCK,
+                         "disable_notification": True}}
     return data_msg
 
 
@@ -179,14 +180,14 @@ class AlarmClock(appapi.AppDaemon):
             self.listen_state(self.change_player, self._room_select)
 
         self._media_player_kodi = conf_data.get('media_player')
-        self._kodi_ip = conf_data.get('kodi_ip', '127.0.0.1')
-        self._kodi_port = conf_data.get('kodi_port', 8080)
-        self._kodi_user = conf_data.get('kodi_user', None)
-        self._kodi_pass = conf_data.get('kodi_pass', None)
+        self._kodi_ip = conf_data.get('kodi_ip')
+        self._kodi_port = conf_data.get('kodi_port')
+        self._kodi_user = conf_data.get('kodi_user')
+        self._kodi_pass = conf_data.get('kodi_pass')
 
         self._media_player_mopidy = conf_data.get('media_player_mopidy')
-        self._mopidy_ip = '192.168.1.51'
-        self._mopidy_port = 6680
+        self._mopidy_ip = conf_data.get('mopidy_ip')
+        self._mopidy_port = int(conf_data.get('mopidy_port'))
 
         # Trigger for last episode and boolean for play status
         self._manual_trigger = self.args.get('manual_trigger', None)
@@ -399,6 +400,7 @@ class AlarmClock(appapi.AppDaemon):
     def prepare_context_alarm(self):
         """Initialize the alarm context (turn on devices, get ready the context, etc.)"""
         self.log('PREPARE_CONTEXT_ALARM', LOG_LEVEL)
+        self.call_service('switch/turn_on', entity_id="switch.caldera")  # Turn ON ACS
         if self.play_in_kodi:
             return self.run_kodi_addon_lacafetera(mode='wakeup')
         else:

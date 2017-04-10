@@ -416,7 +416,7 @@ class EventListener(appapi.AppDaemon):
         self.call_service(self._bot_notifier, target=user_id,
                           message='_Say something to me_, *my master*',
                           data=dict(inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
-                                    disable_notification=False))
+                                    disable_notification=True))
         return True
 
     def _ssh_command_output(self, user, host, command, timeout=10):
@@ -665,7 +665,7 @@ class EventListener(appapi.AppDaemon):
                             'inline_keyboard': TELEGRAM_INLINE_KEYBOARD_ENERPI}}
             prefix = 'SEND ENERPI TILES'
         elif command == '/enerpikwh':
-            cam, cap = 'camera.enerpi_tile_kwh', 'Consumo en kWh y € (24h)'
+            cam, cap = ENERPI_TILES[0], ENERPI_TILES_DESC[0]
             static_url = self._gen_hass_cam_pics(cam)
             photos = [{'url': static_url, 'caption': cap}]
             msg = {'message': "ENERPI CAMERA", "target": user_id,
@@ -673,7 +673,7 @@ class EventListener(appapi.AppDaemon):
                             'inline_keyboard': TELEGRAM_INLINE_KEYBOARD_ENERPI}}
             prefix = 'SEND ENERPI TILE KWH'
         elif command == '/enerpipower':
-            cam, cap = 'camera.enerpi_tile_power', 'Potencia eléctrica, W (24h)'
+            cam, cap = ENERPI_TILES[1], ENERPI_TILES_DESC[1]
             static_url = self._gen_hass_cam_pics(cam)
             photos = [{'url': static_url, 'caption': cap}]
             msg = {'message': "ENERPI CAMERA", "target": user_id,
@@ -681,7 +681,7 @@ class EventListener(appapi.AppDaemon):
                             'inline_keyboard': TELEGRAM_INLINE_KEYBOARD_ENERPI}}
             prefix = 'SEND ENERPI TILE POWER'
         elif command == '/enerpi':
-            cam, cap = 'camera.enerpi_tile_power', 'Potencia eléctrica, W (24h)'
+            cam, cap = ENERPI_TILES[1], ENERPI_TILES_DESC[1]
             static_url = self._gen_hass_cam_pics(cam)
             message = '{}\n\n{}\n'.format(CMD_STATUS_TEMPL_ENERPI,
                                           static_url.replace('_', '\_'))

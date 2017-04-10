@@ -156,7 +156,8 @@ class KodiAssistant(appapi.AppDaemon):
         if img_url is not None:
             message += "\n{}\n".format(img_url)
         data_msg = {"title": title, "message": message,
-                    "data": {"keyboard": TELEGRAM_KEYBOARD_KODI}}
+                    "data": {"keyboard": TELEGRAM_KEYBOARD_KODI,
+                             "disable_notification": True}}
         return data_msg
 
     def _adjust_kodi_lights(self, play=True):

@@ -302,8 +302,6 @@ class MotionAlarm(appapi.AppDaemon):
                                  for s_input, s_use in zip(all_sensors, all_sensors_use)}
         self._dict_friendly_names = {s: self.get_state(s, attribute='friendly_name') for s in all_sensors}
         self._dict_friendly_names.update({c: self.get_state(c, attribute='friendly_name') for c in self._cameras})
-        # TODO Revisar device_class vs sensor_class para v > 0.39
-        # self._dict_sensor_classes = {s: self.get_state(s, attribute='sensor_class') for s in all_sensors}
         self._dict_sensor_classes = {s: self.get_state(s, attribute='device_class') for s in all_sensors}
 
         # Movement detection

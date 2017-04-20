@@ -291,9 +291,11 @@ class AlarmClock(appapi.AppDaemon):
         if self._handle_alarm is not None:
             self.log('Cancelling timer "{}" -> {}'.format(self._handle_alarm, self._next_alarm), LOG_LEVEL)
             self.cancel_timer(self._handle_alarm)
+        str_time_alarm = self.get_state(entity_id=self._alarm_time_sensor)
+        if ':' not in str_time_alarm:
+            str_time_alarm = DEFAULT_EMISION_TIME
         time_alarm = reduce(lambda x, y: x.replace(**{y[1]: int(y[0])}),
-                            zip(self.get_state(entity_id=self._alarm_time_sensor).split(':'),
-                                ['hour', 'minute', 'second']),
+                            zip(str_time_alarm.split(':'), ['hour', 'minute', 'second']),
                             self.datetime().replace(second=0, microsecond=0))
         self._next_alarm = time_alarm - WARM_UP_TIME_DELTA
         self._handle_alarm = self.run_daily(self.run_alarm, self._next_alarm.time())
@@ -413,6 +415,7 @@ class AlarmClock(appapi.AppDaemon):
         # Check if alarm is ready to launch
         alarm_ready, alarm_info = is_last_episode_ready_for_play(self.datetime(), self._tz)
         if alarm_ready:
+            self.call_service('switch/turn_on', entity_id="switch.caldera")  # Turn ON ACS
             if self.play_in_kodi:
                 ok = self.run_kodi_addon_lacafetera()
             else:

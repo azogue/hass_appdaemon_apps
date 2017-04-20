@@ -41,7 +41,7 @@ RG_CRON_JOB = re.compile('\*\* JOB: "(?P<p1>[^@]+?)\s(?P<p2>\S+)\s(?P<p3>\S+)'
 ##################################################
 # Text templates (persistent notifications)
 ##################################################
-DEFAULT_NOTIF_MASK = "Recibido en {:%d/%m/%y %H:%M:%S} desde {}. Raw: {}."
+DEFAULT_NOTIF_MASK = "Notificación recibida en {:%d/%m/%y %H:%M:%S} desde {}."
 NOTIF_MASK_ALARM_ON = "ALARMA CONECTADA en {:%d/%m/%y %H:%M:%S}, desde '{}'."
 NOTIF_MASK_LIGHTS_ON = "Encendido de luces del salón a las " \
                        "{:%d/%m/%y %H:%M:%S}, desde '{}'."
@@ -249,8 +249,8 @@ SSH_PYTHON_ENVS_PREFIX = {
 CMD_STATUS_TITLE = "*Estado de la casa*:"
 CMD_STATUS_TEMPL_SALON = '''*Salón*:
 *LUCES* -> {{states.light.salon.state}} ({{relative_time(states.light.salon.last_changed)}})
-- Tª: {% if states.sensor.salon_temperature %}{{(((states.sensor.salon_temperature.state|float) + (states.sensor.t_salon.state|float)) / 2)|round(1)}}{% else %}{{ states.sensor.t_salon.state }}{% endif %} ºC
-- HR: {{states.sensor.salon_humidity.state}} %
+- Tª: {% if states.sensor.salon_temperature %}{{(((states.sensor.salon_temperature.state|float) + (states.sensor.t_salon.state|float)) / 2)|round(1)}}{% else %}{{ states.sensor.t_salon.state }}{% endif %} ºC{% if states.sensor.salon_humidity %}
+- HR: {{states.sensor.salon_humidity.state}} %{%endif %}
 - Mov: {{states.binary_sensor.pir_salon.state}} ({{relative_time(states.binary_sensor.pir_salon.last_changed)}})
 - VMov: {{states.binary_sensor.motioncam_salon.state}} ({{relative_time(states.binary_sensor.motioncam_salon.last_changed)}})
 {{states.switch.camara.attributes.friendly_name}}: {{states.switch.camara.state}} ({{relative_time(states.switch.camara.last_changed)}})
@@ -263,11 +263,14 @@ KODI: {{states.media_player.kodi.state}} ({{relative_time(states.media_player.ko
 *{{states.light.cuenco.attributes.friendly_name}}* -> {{states.light.cuenco.state}} ({{relative_time(states.light.cuenco.last_changed)}})
 *{{states.light.lamparita.attributes.friendly_name}}* -> {{states.light.lamparita.state}} ({{relative_time(states.light.lamparita.last_changed)}})
 *{{states.light.pie_tv.attributes.friendly_name}}* -> {{states.light.pie_tv.state}} ({{relative_time(states.light.pie_tv.last_changed)}})
-*{{states.light.pie_sofa.attributes.friendly_name}}* -> {{states.light.pie_sofa.state}} ({{relative_time(states.light.pie_sofa.last_changed)}})'''
+*{{states.light.pie_sofa.attributes.friendly_name}}* -> {{states.light.pie_sofa.state}} ({{relative_time(states.light.pie_sofa.last_changed)}})
+
+*{{states.switch.switch_master_alarm.attributes.friendly_name}}: {{states.switch.switch_master_alarm.state}} ({{relative_time(states.switch.switch_master_alarm.last_changed)}})*'''
 CMD_STATUS_TEMPL_DORM = '''*Dormitorio*:
 *LUCES* -> {{states.light.dormitorio.state}} ({{relative_time(states.light.dormitorio.last_changed)}})
-- Tª: {% if states.sensor.dht22_dormitorio_temperature_rpi2mpd.state != 'unknown' %}{{(((states.sensor.dht22_dormitorio_temperature_rpi2mpd.state|float) + (states.sensor.temperatura_dormitorio_rpi2mpd.state|float)) / 2)|round(1)}}{% else %}{{ states.sensor.temperatura_dormitorio_rpi2mpd.state }}{% endif %} ºC
-- HR: {{states.sensor.dht22_dormitorio_humidity_rpi2mpd.state}} %
+- Tª: {{states.sensor.temperatura_dormitorio_rpi2mpd.state}} ºC
+- HR: {{states.sensor.humedad_dormitorio_rpi2mpd.state}} %
+- P: {{states.sensor.presion_dormitorio_rpi2mpd.state}} mbar
 - Mov: {{states.binary_sensor.pir_dormitorio_rpi2mpd.state}} ({{relative_time(states.binary_sensor.pir_dormitorio_rpi2mpd.last_changed)}})
 Altavoz: {{states.switch.altavoz.state}} ({{relative_time(states.switch.altavoz.last_changed)}})
 Mopidy: {{states.media_player.dormitorio_mopidy.state}} ({{relative_time(states.media_player.dormitorio_mopidy.last_changed)}})
@@ -276,13 +279,24 @@ Despertador ({{states.switch.alarm_clock_status.state}}) a las {{states.sensor.a
 
 *Luz* -> {{states.light.hue_habitacion.state}} ({{relative_time(states.light.hue_habitacion.last_changed)}})
 *Lamparita* -> {{states.light.aura_habitacion.state}} ({{relative_time(states.light.aura_habitacion.last_changed)}})'''
+CMD_STATUS_TEMPL_COCINA = '''*Cocina*:
+- Tª: {{states.sensor.esp1_temperature.state}} ºC
+- HR: {{states.sensor.esp1_humidity.state}} %
+- Luz: {{states.sensor.esp1_light.state}} %
+- Mov: {{states.binary_sensor.esp1_pir.state}} ({{relative_time(states.binary_sensor.esp1_pir.last_changed)}})
+
+ESP Leds: {{states.switch.use_esp1_leds.state}}
+ESP Binary sensor: {{states.switch.use_esp1_pir.state}}
+ESP Online: {{states.binary_sensor.cocina_online.state}} ({{relative_time(states.binary_sensor.cocina_online.last_changed)}})
+
+*{{states.switch.cocina.attributes.friendly_name}}* -> {{states.switch.cocina.state}} ({{relative_time(states.switch.cocina.last_changed)}})'''
 CMD_STATUS_TEMPL_ESTUDIO = '''*Estudio*:
 *LUCES* -> {{states.light.estudio.state}} ({{relative_time(states.light.estudio.last_changed)}})
 - Tª: {% if states.sensor.dht22_temperature_rpi2h.state != 'unknown' %}{{(((states.sensor.dht22_temperature_rpi2h.state|float) + (states.sensor.temperatura_estudio_rpi2h.state|float)) / 2)|round(1)}}{% else %}{{ states.sensor.temperatura_estudio_rpi2h.state }}{% endif %} ºC
 - HR: {{states.sensor.dht22_humidity_rpi2h.state}} %
 - Tªh: {{states.sensor.temperature_rpi2h.state}} ºC
 - HRh: {{states.sensor.humidity_rpi2h.state}} %
-- Presión: {{states.sensor.pressure_rpi2h.state}} mbar
+- P: {{states.sensor.pressure_rpi2h.state}} mbar
 - Mov: {{states.binary_sensor.pir_estudio_rpi2h.state}} ({{relative_time(states.binary_sensor.pir_estudio_rpi2h.last_changed)}})
 - VMov: {{states.binary_sensor.motioncam_estudio.state}} ({{relative_time(states.binary_sensor.motioncam_estudio.last_changed)}})
 - Vibr: {{states.binary_sensor.vibration_sensor_rpi2h.state}} ({{relative_time(states.binary_sensor.vibration_sensor_rpi2h.last_changed)}})
@@ -298,21 +312,23 @@ CMD_STATUS_TEMPL_HEATER = '''*Caldera*:
 - ACS: {{states.sensor.galeria_acs.state}} ºC
 - Impulsión: {{states.sensor.galeria_impulsion_calefaccion.state}} ºC
 - Retorno: {{states.sensor.galeria_retorno_calefaccion.state}} ºC'''
-CMD_STATUS_TEMPL_RESTO = '''*Resto*:
-*{{states.switch.switch_master_alarm.attributes.friendly_name}}: {{states.switch.switch_master_alarm.state}} ({{relative_time(states.switch.switch_master_alarm.last_changed)}})*
-
-*{{states.switch.cocina.attributes.friendly_name}}* -> {{states.switch.cocina.state}} ({{relative_time(states.switch.cocina.last_changed)}})
-'''
 CMD_STATUS_TEMPL_ENERPI = '''*Consumo eléctrico*:
 - Potencia: *{{states.sensor.enerpi_power.state}} W* ({{states.sensor.enerpi.state}}, P5min: {{ states.sensor.enerpi.attributes['Power 5min (W)']|round() }} W)
 - Pico hoy: {{ states.sensor.enerpi.attributes['Power Peak (today)'] }} W
 - Consumo hoy: *{{ states.sensor.enerpi.attributes['Consumption Day (Wh)']|multiply(0.001)|round(2) }} kWh*
 - Consumo últimos días: {{ states.sensor.enerpi.attributes['Consumption Week (kWh)'] |replace(",", "; ") }} kWh
   Ilum: {{states.sensor.enerpi_ldr.state}} %'''
-CMD_STATUS_TEMPL_ESP32 = '''*ESP8266*:
-- Tª: {{states.sensor.esp1_temperature.state}} ºC
-- HR: {{states.sensor.esp1_humidity.state}} %'''
+CMD_STATUS_TEMPL_ESP = '''*ESP8266*:
+- Tª: {{states.sensor.esp2_temperature.state}} ºC
+- HR: {{states.sensor.esp2_humidity.state}} %
+- P: {{states.sensor.esp2_pressure.state}} mbar
+- Luz: {{states.sensor.esp2_light.state}} %
+- Mov: {{states.binary_sensor.esp2_pir.state}} ({{relative_time(states.binary_sensor.esp2_pir.last_changed)}})
+- Vibr: {{states.binary_sensor.esp2_vibro.state}} ({{relative_time(states.binary_sensor.esp2_vibro.last_changed)}})
 
+ESP Leds: {{states.switch.use_esp1_leds.state}}
+ESP Binary sensor: {{states.switch.use_esp1_pir.state}}
+ESP Online: {{states.binary_sensor.esp2_online.state}} ({{relative_time(states.binary_sensor.esp2_online.last_changed)}})'''
 CMD_TEMPL_HASS_STATUS = '''*HASS Status*:
 *¿Problemas? -> {{states.binary_sensor.services_notok.state}}* ({{relative_time(states.binary_sensor.services_notok.last_changed)}})
 - IP: {{states.sensor.ip_externa.state}}
@@ -396,7 +412,7 @@ class EventListener(appapi.AppDaemon):
             dev: [self.get_state(dev),
                   self.get_state(dev, attribute='last_changed')]
             for dev in _devs_track}
-        [self.listen_state(self.track_zone_ch, dev, old="home", duration=60)
+        [self.listen_state(self.track_zone_ch, dev, old="home", duration=120)
          for dev in self._tracking_state.keys()]
         [self.listen_state(self.track_zone_ch, dev, new="home", duration=5)
          for dev in self._tracking_state.keys()]
@@ -411,6 +427,9 @@ class EventListener(appapi.AppDaemon):
 
         # Start showing menu:
         self._notify_bot_menu(self._bot_chatids[0])
+
+        # Set show_expert_mode OFF:
+        self.call_service('input_boolean/turn_off', entity_id='input_boolean.show_expert_mode')
 
     def _notify_bot_menu(self, user_id):
         self.call_service(self._bot_notifier, target=user_id,
@@ -601,13 +620,13 @@ class EventListener(appapi.AppDaemon):
             self.call_service(self._bot_notifier, **msg)
             msg['message'] = CMD_STATUS_TEMPL_DORM
             self.call_service(self._bot_notifier, **msg)
+            msg['message'] = CMD_STATUS_TEMPL_COCINA
+            self.call_service(self._bot_notifier, **msg)
             msg['message'] = CMD_STATUS_TEMPL_GALERIA
             self.call_service(self._bot_notifier, **msg)
             msg['message'] = CMD_STATUS_TEMPL_HEATER
             self.call_service(self._bot_notifier, **msg)
-            msg['message'] = CMD_STATUS_TEMPL_RESTO
-            self.call_service(self._bot_notifier, **msg)
-            msg['message'] = CMD_STATUS_TEMPL_ESP32
+            msg['message'] = CMD_STATUS_TEMPL_ESP
             self.call_service(self._bot_notifier, **msg)
             msg['message'] = CMD_STATUS_TEMPL_ENERPI
             msg['data'] = dict(inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
@@ -1027,14 +1046,9 @@ class EventListener(appapi.AppDaemon):
                                   data=dict(keyboard=TELEGRAM_KEYBOARD),
                                   message=rand_msg_mask.format(data_callback))
 
-    def frontend_notif(self, action_name, msg_origin, mask=DEFAULT_NOTIF_MASK,
-                       title=None, raw_data=None):
+    def frontend_notif(self, action_name, msg_origin, mask=DEFAULT_NOTIF_MASK, title=None):
         """Set a persistent_notification in frontend."""
-        if raw_data is not None:
-            message = mask.format(dt.datetime.now(tz=conf.tz),
-                                  msg_origin, raw_data)
-        else:
-            message = mask.format(dt.datetime.now(tz=conf.tz), msg_origin)
+        message = mask.format(dt.datetime.now(tz=conf.tz), msg_origin)
         title = action_name if title is None else title
         self.persistent_notification(message, title=title, id=action_name)
 
@@ -1144,6 +1158,7 @@ class EventListener(appapi.AppDaemon):
             self.call_service('input_slider/select_value',
                               entity_id="input_slider.light_main_slider_salon",
                               value=254)
+            self.call_service('light/turn_on', entity_id="light.salon", brightness=255)
             action_msg_log += 'LIGHTS ON: LIGHT MAIN SLIDER SALON 254'
         elif action == 'HYPERION_TOGGLE':  # Toggle Ambilight
             self.frontend_notif(action, origin,

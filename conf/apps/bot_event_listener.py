@@ -479,7 +479,7 @@ class EventListener(appapi.AppDaemon):
         -o /home/homeassistant/.homeassistant/www/snapshot_cameras/{file}.jpg
         -H "x-ha-access: {hass_pw}" {base_url}/api/camera_proxy/{cam_name}
         """
-        file = cam_entity_id.split('.')[1].replace('_', '') + '.jpg'
+        file = cam_entity_id.replace('_', '') + '.jpg'
         img_url = '{}/api/camera_proxy/{}'.format(self._config['base_url'],
                                                   cam_entity_id)
         cmd = CMD_MAKE_HASS_PIC.format(hass_pw=self._config['ha_key'],
@@ -650,9 +650,8 @@ class EventListener(appapi.AppDaemon):
         elif command == '/getcams':
             photos = [{'file': '/home/homeassistant/picamera/image.jpg',
                        'caption': 'PiCamera Salón'}]
-            for ent, cap in zip(['escam_qf001', 'picamera_estudio'],
+            for cam, cap in zip(['escam_qf001', 'picamera_estudio'],
                                 ['ESCAM QF001 Salón', 'PiCamera Estudio']):
-                cam = 'camera.{}'.format(ent)
                 static_url = self._gen_hass_cam_pics(cam)
                 photos.append({'url': static_url, 'caption': cap})
             if len(photos) > 1:
@@ -668,8 +667,7 @@ class EventListener(appapi.AppDaemon):
             prefix = 'SEND CAMERA PICS'
         elif command == '/enerpitiles':
             photos = []
-            for ent, cap in zip(ENERPI_TILES, ENERPI_TILES_DESC):
-                cam = 'camera.{}'.format(ent)
+            for cam, cap in zip(ENERPI_TILES, ENERPI_TILES_DESC):
                 static_url = self._gen_hass_cam_pics(cam)
                 photos.append({'url': static_url, 'caption': cap})
             if len(photos) > 1:
@@ -829,7 +827,8 @@ class EventListener(appapi.AppDaemon):
         """Event listener."""
         if 'notification_action_fired' in event_id:
             action_name = payload_event['actionName']
-            if action_name == 'com.apple.UNNotificationDefaultActionIdentifier':
+            if ((action_name == 'com.apple.UNNotificationDefaultActionIdentifier') or
+                    (action_name == 'com.apple.UNNotificationDismissActionIdentifier')):
                 # iOS Notification discard
                 self.log('NOTIFICATION Discard: {} - Args={}, more={}'
                          .format(event_id, payload_event, args))

@@ -183,7 +183,7 @@ TELEGRAM_KEYBOARD = ['/armado, /lucesoff',
                      '/luceson, /ambilighttoggle',
                      '/cathass, /catappd, /catappderr',
                      '/enerpi, /enerpitiles, /getcams',
-                     '/status, /hastatus, /help'
+                     '/status, /hastatus, /help',
                      '/hasswiz, /init']
 TELEGRAM_INLINE_KEYBOARD_ENERPI = [
     [('Apaga luces', '/lucesoff'), ('Enciende luces', '/luceson')],
@@ -379,9 +379,9 @@ class EventListener(appapi.AppDaemon):
 
     def initialize(self):
         """AppDaemon required method for app init."""
+        self._bot_notifier = 'mytelegram_bot'
         self._config = dict(self.config['AppDaemon'])
         self._notifier = self._config.get('notifier').replace('.', '/')
-        self._bot_notifier = self._config.get('bot_notifier').replace('.', '/')
         _chatids = [int(x) for x in self._config.get('bot_chatids').split(',')]
         _nicknames = self._config.get('bot_nicknames').split(',')
         self._bot_chatids = _chatids
@@ -428,14 +428,15 @@ class EventListener(appapi.AppDaemon):
         # Start showing menu:
         self._notify_bot_menu(self._bot_chatids[0])
 
-        # Set show_expert_mode OFF:
-        self.call_service('input_boolean/turn_off', entity_id='input_boolean.show_expert_mode')
+        # TODO Remove in the future (homeassistant.start trigger is not working)
+        self.fire_event('homeassistant_start')
 
     def _notify_bot_menu(self, user_id):
-        self.call_service(self._bot_notifier, target=user_id,
+        self.call_service(self._bot_notifier + '/send_message',
+                          target=user_id,
                           message='_Say something to me_, *my master*',
-                          data=dict(inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
-                                    disable_notification=True))
+                          inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
+                          disable_notification=True)
         return True
 
     def _ssh_command_output(self, user, host, command, timeout=10):
@@ -531,17 +532,17 @@ class EventListener(appapi.AppDaemon):
         elif command == '/tvshowsinfo':
             user, host = 'osmc', 'rpi3osmc'
             cmd = SSH_PYTHON_ENVS_PREFIX[host].format(user)
-            cmd += "python /home/osmc/PYTHON/tvshows -i " + args
+            cmd += "python /home/osmc/PYTHON/tvshows -i " + ' '.join(args)
             return self._ssh_command_output(user, host, cmd, 600)
         elif command == '/tvshowsdd':
             user, host = 'osmc', 'rpi3osmc'
             cmd = SSH_PYTHON_ENVS_PREFIX[host].format(user)
-            cmd += "python /home/osmc/PYTHON/tvshows -dd " + args
+            cmd += "python /home/osmc/PYTHON/tvshows -dd " + ' '.join(args)
             return self._ssh_command_output(user, host, cmd, 600)
         elif command == '/osmc':
             user, host = 'osmc', 'rpi3osmc'
-            if args.startswith('python'):
-                args = SSH_PYTHON_ENVS_PREFIX[host].format(user) + args
+            if args and args[0].startswith('python'):
+                args = SSH_PYTHON_ENVS_PREFIX[host].format(user) + ' '.join(args)
             return self._ssh_command_output(user, host, args, timeout)
         elif command == '/osmcmail':
             user, host = 'osmc', 'rpi3osmc'
@@ -549,23 +550,23 @@ class EventListener(appapi.AppDaemon):
             return self._ssh_command_output(user, host, cmd, timeout)
         elif (command == '/rpi3') or (command == '/rpi3w'):
             user, host = 'pi', 'rpi3w'
-            if args.startswith('python'):
-                args = SSH_PYTHON_ENVS_PREFIX[host].format(user) + args
+            if args and args[0].startswith('python'):
+                args = SSH_PYTHON_ENVS_PREFIX[host].format(user) + ' '.join(args)
             return self._ssh_command_output(user, host, args, timeout)
         elif command == '/rpi2':
             user, host = 'pi', 'rpi2'
-            if args.startswith('python'):
-                args = SSH_PYTHON_ENVS_PREFIX[host].format(user) + args
+            if args and args[0].startswith('python'):
+                args = SSH_PYTHON_ENVS_PREFIX[host].format(user) + ' '.join(args)
             return self._ssh_command_output(user, host, args, timeout)
         elif command == '/rpi2h':
             user, host = 'pi', 'rpi2h'
-            if args.startswith('python'):
-                args = SSH_PYTHON_ENVS_PREFIX[host].format(user) + args
+            if args and args[0].startswith('python'):
+                args = SSH_PYTHON_ENVS_PREFIX[host].format(user) + ' '.join(args)
             return self._ssh_command_output(user, host, args, timeout)
         elif command == '/rpi':
             user, host = 'pi', 'rpi'
-            if args.startswith('python'):
-                args = SSH_PYTHON_ENVS_PREFIX[host].format(user) + args
+            if args and args[0].startswith('python'):
+                args = SSH_PYTHON_ENVS_PREFIX[host].format(user) + ' '.join(args)
             return self._ssh_command_output(user, host, args, timeout)
         elif command == '/pitemps':
             cmd = 'python3 /home/pi/pitemps.py'
@@ -581,10 +582,11 @@ class EventListener(appapi.AppDaemon):
             cmd = 'tail -n 100 /home/homeassistant/appdaemon_err.log'
             return self._shell_command_output(cmd, timeout=timeout, **kwargs)
         else:  # shell cmd
-            return self._shell_command_output(args, timeout=timeout, **kwargs)
+            return self._shell_command_output(' '.join(args), timeout=timeout, **kwargs)
 
-    def _bot_hass_command(self, command, cmd_args, user_id):
+    def _bot_hass_cmd(self, command, cmd_args, user_id):
         # TODO + comandos, fuzzy logic con cmd + args, etc...
+        serv = self._bot_notifier + '/send_message'
         prefix = 'WTF CMD {}'.format(command)
         msg = {'message': "ERROR {} - {}".format(command, cmd_args),
                "target": user_id}
@@ -592,110 +594,102 @@ class EventListener(appapi.AppDaemon):
             msg = dict(title='*HASS Wizard*',
                        message=HASSWIZ_STEPS[0]['question'],
                        target=user_id,
-                       data=dict(inline_keyboard=HASSWIZ_STEPS[0]['options']))
+                       inline_keyboard=HASSWIZ_STEPS[0]['options'])
             prefix = 'START HASS WIZARD'
         elif command == '/help':
             # Welcome message & keyboards:
             prefix = 'SHOW BOT HELP'
             msg = dict(target=user_id, message=TELEGRAM_BOT_HELP,
-                       data=dict(inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
-                                 disable_notification=False))
+                       inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
+                       disable_notification=False)
         elif (command == '/init') or (command == '/start'):
             # Welcome message & keyboards:
             prefix = 'BOT START'
             msg = dict(target=user_id,
                        message='_Say something to me_, *my master*',
-                       data=dict(inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
-                                 disable_notification=False))
+                       inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
+                       disable_notification=False)
         elif command == '/status':
             # multiple messaging:
             msg = dict(title=CMD_STATUS_TITLE, message=CMD_STATUS_TEMPL_SALON,
-                       target=user_id,
-                       data=dict(keyboard=TELEGRAM_KEYBOARD,
-                                 disable_notification=True))
-            self.call_service(self._bot_notifier, **msg)
+                       target=user_id, keyboard=TELEGRAM_KEYBOARD,
+                       disable_notification=True)
+            self.call_service(serv, **msg)
             msg.pop('title')
-            msg['data'].pop('keyboard')
+            msg.pop('keyboard')
             msg['message'] = CMD_STATUS_TEMPL_ESTUDIO
-            self.call_service(self._bot_notifier, **msg)
+            self.call_service(serv, **msg)
             msg['message'] = CMD_STATUS_TEMPL_DORM
-            self.call_service(self._bot_notifier, **msg)
+            self.call_service(serv, **msg)
             msg['message'] = CMD_STATUS_TEMPL_COCINA
-            self.call_service(self._bot_notifier, **msg)
+            self.call_service(serv, **msg)
             msg['message'] = CMD_STATUS_TEMPL_GALERIA
-            self.call_service(self._bot_notifier, **msg)
+            self.call_service(serv, **msg)
             msg['message'] = CMD_STATUS_TEMPL_HEATER
-            self.call_service(self._bot_notifier, **msg)
+            self.call_service(serv, **msg)
             msg['message'] = CMD_STATUS_TEMPL_ESP
-            self.call_service(self._bot_notifier, **msg)
+            self.call_service(serv, **msg)
             msg['message'] = CMD_STATUS_TEMPL_ENERPI
-            msg['data'] = dict(inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
-                               disable_notification=False)
-            # self.call_service(self._bot_notifier, **msg)
+            msg.update(dict(inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
+                            disable_notification=False))
             prefix = 'SHOW HASS STATUS'
         elif command == '/hastatus':
             msg = dict(message=CMD_TEMPL_HASS_STATUS,
                        target=user_id,
-                       data=dict(inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
-                                 disable_notification=False))
+                       inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
+                       disable_notification=False)
             prefix = 'SHOW HASS PROCESS STATUS'
         elif command == '/html':
-            msg = dict(data=dict(parse_mode='html', keyboard=TELEGRAM_KEYBOARD),
-                       message=cmd_args, target=user_id)
+            msg = dict(parse_mode='html', keyboard=TELEGRAM_KEYBOARD,
+                       message=' '.join(cmd_args), target=user_id)
             prefix = 'HTML RENDER'
         elif command == '/template':
-            msg = dict(message=cmd_args, target=user_id,
-                       data=dict(keyboard=TELEGRAM_KEYBOARD))
+            msg = dict(message=' '.join(cmd_args), target=user_id,
+                       keyboard=TELEGRAM_KEYBOARD)
             prefix = 'TEMPLATE RENDER'
         elif command == '/getcams':
-            photos = [{'file': '/home/homeassistant/picamera/image.jpg',
-                       'caption': 'PiCamera Salón'}]
+            serv = self._bot_notifier + '/send_photo'
+            msg = {"target": user_id,
+                   'keyboard': TELEGRAM_KEYBOARD}
+            self.call_service(serv,
+                              file='/home/homeassistant/picamera/image.jpg',
+                              caption='PiCamera Salón', **msg)
             for cam, cap in zip(['escam_qf001', 'picamera_estudio'],
                                 ['ESCAM QF001 Salón', 'PiCamera Estudio']):
                 static_url = self._gen_hass_cam_pics(cam)
-                photos.append({'url': static_url, 'caption': cap})
-            if len(photos) > 1:
-                first = photos[:-1]
-                photos = [photos[-1]]
-                msg = {'message': "HASS CAMERAS", "target": user_id,
-                       'data': {'photo': first,
-                                'keyboard': TELEGRAM_KEYBOARD}}
-                self.call_service(self._bot_notifier, **msg)
-            msg = {'message': "HASS CAMERAS", "target": user_id,
-                   'data': {'photo': photos,
-                            'inline_keyboard': TELEGRAM_INLINE_KEYBOARD}}
+                self.call_service(serv, url=static_url, caption=cap, **msg)
+            serv = self._bot_notifier + '/edit_replymarkup'
+            msg = {"chat_id": user_id,
+                   "message_id": 'last',
+                   'inline_keyboard': TELEGRAM_INLINE_KEYBOARD}
             prefix = 'SEND CAMERA PICS'
         elif command == '/enerpitiles':
-            photos = []
+            serv = self._bot_notifier + '/send_photo'
+            msg = {"target": user_id,
+                   'keyboard': TELEGRAM_KEYBOARD_ENERPI}
             for cam, cap in zip(ENERPI_TILES, ENERPI_TILES_DESC):
                 static_url = self._gen_hass_cam_pics(cam)
-                photos.append({'url': static_url, 'caption': cap})
-            if len(photos) > 1:
-                first = photos[:-1]
-                photos = [photos[-1]]
-                msg = {'message': "ENERPI CAMERAS", "target": user_id,
-                       'data': {'photo': first,
-                                'keyboard': TELEGRAM_KEYBOARD_ENERPI}}
-                self.call_service(self._bot_notifier, **msg)
-            msg = {'message': "ENERPI CAMERAS", "target": user_id,
-                   'data': {'photo': photos,
-                            'inline_keyboard': TELEGRAM_INLINE_KEYBOARD_ENERPI}}
+                self.call_service(serv, url=static_url, caption=cap, **msg)
+            serv = self._bot_notifier + '/edit_replymarkup'
+            msg = {"chat_id": user_id,
+                   "message_id": 'last',
+                   'inline_keyboard': TELEGRAM_INLINE_KEYBOARD_ENERPI}
             prefix = 'SEND ENERPI TILES'
         elif command == '/enerpikwh':
             cam, cap = ENERPI_TILES[0], ENERPI_TILES_DESC[0]
             static_url = self._gen_hass_cam_pics(cam)
-            photos = [{'url': static_url, 'caption': cap}]
-            msg = {'message': "ENERPI CAMERA", "target": user_id,
-                   'data': {'photo': photos,
-                            'inline_keyboard': TELEGRAM_INLINE_KEYBOARD_ENERPI}}
+            serv = self._bot_notifier + '/send_photo'
+            msg = {"target": user_id,
+                   'url': static_url, 'caption': cap,
+                   'inline_keyboard': TELEGRAM_INLINE_KEYBOARD_ENERPI}
             prefix = 'SEND ENERPI TILE KWH'
         elif command == '/enerpipower':
             cam, cap = ENERPI_TILES[1], ENERPI_TILES_DESC[1]
             static_url = self._gen_hass_cam_pics(cam)
-            photos = [{'url': static_url, 'caption': cap}]
-            msg = {'message': "ENERPI CAMERA", "target": user_id,
-                   'data': {'photo': photos,
-                            'inline_keyboard': TELEGRAM_INLINE_KEYBOARD_ENERPI}}
+            serv = self._bot_notifier + '/send_photo'
+            msg = {"target": user_id,
+                   'url': static_url, 'caption': cap,
+                   'inline_keyboard': TELEGRAM_INLINE_KEYBOARD_ENERPI}
             prefix = 'SEND ENERPI TILE POWER'
         elif command == '/enerpi':
             cam, cap = ENERPI_TILES[1], ENERPI_TILES_DESC[1]
@@ -704,9 +698,9 @@ class EventListener(appapi.AppDaemon):
                                           static_url.replace('_', '\_'))
             msg = {'title': "*Power status*:", 'message': message,
                    "target": user_id,
-                   'data': {'inline_keyboard': TELEGRAM_INLINE_KEYBOARD_ENERPI}}
+                   'inline_keyboard': TELEGRAM_INLINE_KEYBOARD_ENERPI}
             prefix = 'ENERPI INFO'
-        return prefix, msg
+        return serv, prefix, msg
 
     # noinspection PyUnusedLocal
     def alarm_mode_controller(self, entity, attribute, old, new, kwargs):
@@ -845,16 +839,16 @@ class EventListener(appapi.AppDaemon):
                                  user_id, callback_id=None):
         tic = time()
         if callback_id is not None:
-            msg = dict(data=dict(callback_query=dict(
-                callback_query_id=callback_id, show_alert=False)),
-                target=user_id)
+            msg = dict(callback_query_id=callback_id, show_alert=False)
+            service = self._bot_notifier + '/answer_callback_query'
         else:
             msg = dict(target=user_id)
+            service = self._bot_notifier + '/send_message'
         if command in TELEGRAM_IOS_COMMANDS:  # Same as iOS notification:
             msg["message"] = 'Exec: *{}* action'.format(command)
             if callback_id is not None:
                 msg['message'] = msg['message'].replace('*', '')
-            self.call_service(self._bot_notifier, **msg)
+            self.call_service(service, **msg)
             self.log('TELEGRAM_COMMAND exec: {}'.format(command))
             self.response_to_action(TELEGRAM_IOS_COMMANDS[command],
                                     self._bot_users[user_id],
@@ -863,7 +857,7 @@ class EventListener(appapi.AppDaemon):
             msg["message"] = '_Running shell cmd_: {}'.format(command)
             if callback_id is not None:
                 msg['message'] = msg['message'].replace('_', '')
-            self.call_service(self._bot_notifier, **msg)
+            self.call_service(service, **msg)
             ok, render, out = self._exec_bot_shell_command(command, cmd_args)
             if len(out) > 4000:
                 out = out[-4000:]
@@ -874,47 +868,47 @@ class EventListener(appapi.AppDaemon):
                 message = "\n{}\n".format(out)
             else:
                 message = "```\n{}\n```".format(out.replace('```', ''))
-            self.call_service(self._bot_notifier, title=title, target=user_id,
-                              message=message)
+            self.call_service(self._bot_notifier + '/send_message',
+                              title=title, target=user_id, message=message)
         elif command in TELEGRAM_HASS_CMDS:
             msg["message"] = '_Running_: {}'.format(command)
             if callback_id is not None:
                 msg['message'] = msg['message'].replace('_', '')
-            self.call_service(self._bot_notifier, **msg)
-            prefix, msg = self._bot_hass_command(command, cmd_args, user_id)
+            self.call_service(service, **msg)
+            serv, prefix, msg = self._bot_hass_cmd(command, cmd_args, user_id)
             self.log('{} TOOK {:.3f}s'.format(prefix, time() - tic))
-            self.call_service(self._bot_notifier, **msg)
+            self.call_service(serv, **msg)
         else:
             rand_msg_mask = TELEGRAM_UNKNOWN[randrange(len(TELEGRAM_UNKNOWN))]
             p_cmd = '{}({})'.format(command, cmd_args)
+            message = rand_msg_mask.format('{}({})'.format(command, cmd_args))
             self.log('NOT IMPLEMENTED: ' + rand_msg_mask.format(p_cmd))
-            self.call_service(self._bot_notifier, target=user_id,
-                              data=dict(keyboard=TELEGRAM_KEYBOARD),
-                              message=rand_msg_mask.format(
-                                  '{}({})'.format(command, cmd_args)))
+            self.call_service(self._bot_notifier + '/send_message',
+                              target=user_id, keyboard=TELEGRAM_KEYBOARD,
+                              message=message)
 
     def process_telegram_wizard(self, msg_origin, data_callback,
                                 user_id, callback_id):
         # Wizard evolution:
         option = data_callback[len(COMMAND_WIZARD_OPTION):]
-        data_msg = dict(callback_query=dict(callback_query_id=callback_id))
+        data_msg = dict(callback_query_id=callback_id, show_alert = False)
+        answer_callback_serv = self._bot_notifier + '/answer_callback_query'
         if option == 'reset':
             self._bot_wizstack[user_id] = []
             self.log('HASSWIZ RESET')
-            self.call_service(self._bot_notifier, data=data_msg,
-                              target=user_id,
-                              message="Reset wizard, start again")
+            self.call_service(answer_callback_serv,
+                              message="Reset wizard, start again", **data_msg)
         elif option == 'back':
             self._bot_wizstack[user_id] = self._bot_wizstack[user_id][:-1]
             message = "Back to: {}".format(self._bot_wizstack[user_id])
             self.log('HASSWIZ BACK --> {}'.format(self._bot_wizstack[user_id]))
-            self.call_service(self._bot_notifier, data=data_msg,
-                              target=user_id, message=message)
+            self.call_service(answer_callback_serv,
+                              message=message, **data_msg)
         elif option == 'exit':
             self._bot_wizstack[user_id] = []
             self.log('HASSWIZ EXIT')
-            self.call_service(self._bot_notifier, data=data_msg,
-                              target=user_id, message="Bye bye...")
+            self.call_service(answer_callback_serv,
+                              message="Bye bye...", **data_msg)
             return self._notify_bot_menu(user_id)
         else:
             self._bot_wizstack[user_id].append(option)
@@ -926,13 +920,13 @@ class EventListener(appapi.AppDaemon):
                 # CALLING SERVICE / GET STATES
                 if (service in ['switch', 'light', 'input_boolean']) and (operation in ['turn_on', 'turn_off']):
                     message = "Service called: {}/{}/{}"
-                    message = message.format(_clean(service), _clean(operation), _clean(entity_id))
+                    message = message.format(service, operation, entity_id)
                     self.log('HASSWIZ: CALLING SERVICE "{}". Stack: {}'
                              .format(message, self._bot_wizstack[user_id]))
                     self.call_service('{}/{}'.format(service, operation),
                                       entity_id=entity)
-                    self.call_service(self._bot_notifier, data=data_msg,
-                                      target=user_id, message=message)
+                    self.call_service(answer_callback_serv,
+                                      message=message, **data_msg)
                 elif operation in ['state', 'attributes']:
                     if operation == 'state':
                         data = self.get_state(entity)
@@ -940,24 +934,25 @@ class EventListener(appapi.AppDaemon):
                         data = self.get_state(entity, attribute='attributes')
                     self.log('HASSWIZ STATE DATA -> {}/{}/{} -> {}'
                              .format(service, operation, entity_id, data))
-                    message = "*{} {}*:\n--> {}".format(_clean(entity_id), _clean(operation), _clean(str(data)))
-                    self.call_service(self._bot_notifier,
-                                      target=user_id, message=message)
+                    message = "{} {}: -> {}".format(entity_id, operation, str(data))
+                    self.call_service(answer_callback_serv,
+                                      message=message, **data_msg)
                 else:
                     comb_err = '{}/{}/{}'.format(service, operation, entity_id)
+                    message = 'Combination *not implemented* -> '
+                    message += _clean(comb_err)
                     self.log('ERROR: COMBINATION NOT IMPLEMENTED -> {}'
                              .format(comb_err), 'warning')
-                    self.call_service(self._bot_notifier, data=data_msg,
-                                      target=user_id,
-                                      message='Combination *not implemented* -> ' + _clean(comb_err))
+                    self.call_service(answer_callback_serv,
+                                      message=message, **data_msg)
                     return False
                 return True
             else:
                 # Notificación de respuesta:
-                self.log('OPTION SELECTED: "{}"'.format(option))
-                self.call_service(self._bot_notifier, data=data_msg,
-                                  target=user_id,
-                                  message="Option selected: {}".format(option))
+                message = "Option selected: {}".format(option)
+                self.log(message)
+                self.call_service(answer_callback_serv,
+                                  message=message, **data_msg)
         # Show next wizard step
         try:
             wiz_step = HASSWIZ_STEPS[len(self._bot_wizstack[user_id])]
@@ -989,17 +984,11 @@ class EventListener(appapi.AppDaemon):
                 wiz_step_inline_kb.append(wiz_step_inline_kb_row)
             wiz_step_inline_kb.append(HASSWIZ_MENU_ACTIONS)
 
-        msg_id = msg_origin['message_id']
-        # # Edición de teclado -> no necesaria
-        # self.call_service(self._bot_notifier, message=wiz_step_text,
-        #                   target=user_id,
-        #                   data=dict(edit_replymarkup=dict(message_id=msg_id),
-        #                             inline_keyboard=wiz_step_inline_kb))
-        # Edición de mensaje y de teclado:
-        self.call_service(self._bot_notifier, message=wiz_step_text,
-                          target=user_id,
-                          data=dict(edit_message=dict(message_id=msg_id),
-                                    inline_keyboard=wiz_step_inline_kb))
+        self.call_service(self._bot_notifier + '/edit_message',
+                          message=wiz_step_text,
+                          chat_id=user_id,
+                          message_id=msg_origin['message_id'],
+                          inline_keyboard=wiz_step_inline_kb)
         return True
 
     # noinspection PyUnusedLocal
@@ -1016,7 +1005,8 @@ class EventListener(appapi.AppDaemon):
             text = payload_event['text']
             msg = 'TEXT RECEIVED: ```\n{}\n```'.format(text)
             self.log('TELEGRAM TEXT: ' + str(text))
-            self.call_service(self._bot_notifier, target=user_id, message=msg)
+            self.call_service(self._bot_notifier + '/send_message',
+                              target=user_id, message=msg)
         else:
             assert event_id == 'telegram_callback'
             msg_origin = payload_event['message']
@@ -1041,8 +1031,9 @@ class EventListener(appapi.AppDaemon):
                     randrange(len(TELEGRAM_UNKNOWN))]
                 self.log('CALLBACK RESPONSE NOT IMPLEMENTED: '
                          + rand_msg_mask.format(data_callback))
-                self.call_service(self._bot_notifier, target=user_id,
-                                  data=dict(keyboard=TELEGRAM_KEYBOARD),
+                self.call_service(self._bot_notifier + '/send_message',
+                                  target=user_id,
+                                  keyboard=TELEGRAM_KEYBOARD,
                                   message=rand_msg_mask.format(data_callback))
 
     def frontend_notif(self, action_name, msg_origin, mask=DEFAULT_NOTIF_MASK, title=None):
@@ -1206,56 +1197,3 @@ class EventListener(appapi.AppDaemon):
             self.frontend_notif(action, origin)
 
         self.log(action_msg_log)
-        # if telegram_target is not None:
-        #     # edit the caption notification:
-        #     # msg = dict(target=telegram_target[0],
-        #     #            message='It is done, my master\n{}'.format(action_msg_log),
-        #     #            data=dict(edit_caption=dict(caption='It is done OK: {}'.format(action_msg_log),
-        #     #                                        inline_message_id=msg_origin['message_id'])))
-        #     #
-        #     # msg = dict(target=telegram_target[0],
-        #     #            message='It is done, my master\n{}'.format(action_msg_log),
-        #     #            data=dict(edit_caption=dict(caption='It is done OK: {}'.format(action_msg_log),
-        #     #                                        inline_message_id=msg_origin['message_id'])))
-        #
-        #     self.call_service(self._bot_notifier, target=telegram_target[0],
-        #                       message='It is done, my master\n{}'.format(action_msg_log),
-        #                       data=dict(callback_query=dict(callback_query_id=telegram_target[1], show_alert=True)))
-
-    # debug
-    def _test_notification_actions(self):
-
-        def _flash_color(args):
-            self.light_flash(XY_COLORS[args['color']], persistence=3, n_flashes=1)
-
-        # noinspection PyUnusedLocal
-        def _push_category(args):
-            category = args['category']
-            data_msg = {"title": "Test {}".format(category),
-                        "message": "{} test iOS notif->{}".format(category, self._notifier),
-                        "data": {"push": {"badge": args['badge'],
-                                          "category": category}}}
-            self.log('TEST PUSH_CATEGORY {} --> {}'.format(category, data_msg))
-            self.call_service(self._notifier, **data_msg)
-
-        # noinspection PyUnusedLocal
-        def _push_camera(*args):
-            data_msg = {"title": "Test camera",
-                        "message": "camera test iOS notif->{}".format(self._notifier),
-                        "data": {"push": {"target": "28ab3a8f-3ff6-30cd-b93b-8bb854cbf483",
-                                          "category": "camera",
-                                          "hide-thumbnail": False},
-                                 "entity_id": "camera.escam_qf001"}}  # "camera.picamera_salon"
-            self.log('TEST PUSH_CAMERA --> {}'.format(data_msg))
-            self.call_service(self._notifier, **data_msg)
-
-        # self.run_in(_flash_color, 5, color='orange')
-        self.run_in(_push_camera, 2)
-        # self.run_in(_push_category, 25, category='KODIPLAY', badge=1)
-        # self.run_in(_push_category, 50, category='ALARMSOUNDED', badge=2)
-        # self.run_in(_push_category, 3, category='ALARMCLOCK', badge=3)
-        # self.run_in(_push_category, 60, category='AWAY', badge=3)
-        # self.run_in(_push_category, 120, category='INHOME', badge=3)
-        # self.run_in(_push_category, 40, category='AWAY', badge=3)
-        # self.run_in(_push_category, 60, category='INHOME', badge=3)
-        # self.run_in(_push_category, 100, category='EXECORDER', badge=0)

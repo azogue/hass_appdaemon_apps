@@ -163,8 +163,8 @@ class EnerpiPeakNotifier(appapi.AppDaemon):
 
     def _make_telegram_message(self, reset_alarm=False):
         data_msg = self._get_notif_data(reset_alarm)
-        data_msg["data"] = {"keyboard": ['/luceson, /lucesoff',
-                                         '/pitemps, /status', '/init']}
+        data_msg["keyboard"] = ['/luceson, /lucesoff',
+                                '/pitemps, /status', '/init']
         return data_msg
 
     # noinspection PyUnusedLocal

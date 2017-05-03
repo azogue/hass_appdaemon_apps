@@ -43,6 +43,7 @@ def get_info_last_ep(tz, limit=1):
     """Extrae la información del último (o 'n-último') episodio disponible de La Cafetera de Radiocable.com"""
     base_url_v2 = 'https://api.spreaker.com/v2/'
     cafetera_showid = 1060718
+    duration = None
     mask_url = base_url_v2 + 'shows/' + str(cafetera_showid) + '/episodes?limit=' + str(limit)
     r = requests.get(mask_url)
     if r.ok:
@@ -51,9 +52,7 @@ def get_info_last_ep(tz, limit=1):
             episode = data['response']['items'][-1]
             published = parse(episode['published_at']).replace(tzinfo=pytz.UTC).astimezone(tz).replace(tzinfo=None)
             is_live = episode['type'] == 'LIVE'
-            if is_live:
-                duration = dt.timedelta(hours=DEFAULT_DURATION)
-            else:
+            if not is_live:
                 duration = dt.timedelta(seconds=episode['duration'] / 1000)
             return True, {'published': published, 'is_live': is_live, 'duration': duration, 'episode': episode}
         return False, data
@@ -107,8 +106,8 @@ def _make_telegram_notification_episode(ep_info):
     if img_url is not None:
         message += "\n{}\n".format(img_url)
     data_msg = {"title": title, "message": message,
-                "data": {"keyboard": TELEGRAM_KEYBOARD_ALARMCLOCK,
-                         "disable_notification": True}}
+                "keyboard": TELEGRAM_KEYBOARD_ALARMCLOCK,
+                "disable_notification": True}
     return data_msg
 
 
@@ -424,9 +423,16 @@ class AlarmClock(appapi.AppDaemon):
             # Notification:
             self.notify_alarmclock(alarm_info)
             self.set_state(self._manual_trigger, state='on')
-            duration = alarm_info['duration'].total_seconds() if ('duration' in alarm_info) else DEFAULT_DURATION * 3600
-            self._handler_turnoff = self.run_in(self.turn_off_alarm_clock, int(duration))
-            self.log('ALARM RUNNING NOW. AUTO STANDBY PROGRAMMED IN {:.0f} SECONDS'.format(duration), LOG_LEVEL)
+            if alarm_info['duration'] is not None:
+                duration = alarm_info['duration'].total_seconds() + 20
+                self._handler_turnoff = self.run_in(self.turn_off_alarm_clock,
+                                                    int(duration))
+                self.log('ALARM RUNNING NOW. AUTO STANDBY PROGRAMMED '
+                         'IN {:.0f} SECONDS'.format(duration), LOG_LEVEL)
+            elif not self.play_in_kodi:
+                self._handler_turnoff = self.listen_state(
+                    self.turn_off_alarm_clock, self._media_player_mopidy,
+                    new="off", duration=20)
         else:
             self.log('POSTPONE ALARM', LOG_LEVEL)
             self.run_in(self.trigger_service_in_alarm, STEP_RETRYING_SEC)
@@ -449,48 +455,3 @@ class AlarmClock(appapi.AppDaemon):
         self.call_service('light/turn_off', entity_id=self._lights_alarm, transition=1)
         self.run_in(self.trigger_service_in_alarm, self._delta_time_postponer_sec)
         self.log('Postponiendo alarma {:.1f} minutos...'.format(self._delta_time_postponer_sec / 60.))
-
-
-# if __name__ == '__main__':
-#     def _run_mopidy_stream_lacafetera(ep_info):
-#         """Play stream in mopidy."""
-#         print('RUN_MOPIDY_STREAM_LACAFETERA with ep_info={}'.format(ep_info), LOG_LEVEL)
-#
-#         url_base = 'http://192.168.1.52:6680/mopidy/rpc'
-#
-#         url = MASK_URL_STREAM_MOPIDY.format(ep_info['episode']['episode_id'])
-#         print(url, ep_info['episode']['site_url'])
-#         headers = {'Content-Type': 'application/json'}
-#         payload = {"method": "core.tracklist.add", "jsonrpc": "2.0", "id": 1,
-#                    "params": {"tracks": None,
-#                               "at_position": None,
-#                               "uri": url}}
-#         r = requests.post(url_base, headers=headers, data=json.dumps(payload))
-#         print(r.content)
-#         if r.ok:
-#             result = r.text
-#             json_res = json.loads(result)
-#             if ("result" in json_res) and (len(json_res["result"]) > 0):
-#                 track_info = json_res["result"][0]
-#                 # track_info['track']['name'] = ep_info['episode']['title']
-#                 # track_info['track']['name'] = 'lalala'
-#                 # track_info['track']['name'] = ep_info['episode']['image_url']
-#                 print('trackInfo: {}'.format(track_info))
-#                 payload["method"] = "core.playback.play"
-#                 payload["params"] = {"tl_track": track_info}  #, "on_error_step": -1}
-#                 print('payload={}'.format(payload))
-#                 r = requests.post(url_base, headers=headers, data=json.dumps(payload))
-#                 print(r)
-#                 print(r.content.decode())
-#                 if r.ok:
-#                     return True
-#         print('MOPIDY NOT PRESENT? -> {}'.format(r.content), 'ERROR')
-#         return False
-#
-#
-#     is_ready, ep_info = is_last_episode_ready_for_play(dt.datetime.now(), tz=pytz.UTC)
-#     print(is_ready)
-#     print(ep_info)
-#     print(ep_info['episode']['site_url'])
-#     print('"https://www.spreaker.com/episode/10365929"')
-#     print(_run_mopidy_stream_lacafetera(ep_info))

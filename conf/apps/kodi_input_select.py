@@ -28,6 +28,7 @@ class DynamicKodiInputSelect(appapi.AppDaemon):
     """App to populate an input select with Kodi API calls results."""
 
     _ids_options = None
+    _last_values = None
 
     def initialize(self):
         """Set up appdaemon app."""
@@ -36,6 +37,7 @@ class DynamicKodiInputSelect(appapi.AppDaemon):
 
         # Input select:
         self._ids_options = {DEFAULT_ACTION: None}
+        self._last_values = []
 
     # noinspection PyUnusedLocal
     def _receive_kodi_result(self, event_id, payload_event, *args):
@@ -48,23 +50,32 @@ class DynamicKodiInputSelect(appapi.AppDaemon):
                 #                      result['movies']))[:MAX_RESULTS]
                 values = result['movies'][:MAX_RESULTS]
                 data = [('{} ({})'.format(r['label'], r['year']),
-                         ('MOVIE', r['file'])) for r in values]
+                         ('MOVIE', r['file'], None)) for r in values]
                 self._ids_options.update(dict(zip(*zip(*data))))
                 labels = list(list(zip(*data))[0])
-                self.log('NEW OPTIONS:\n{}'.format(labels))
+                self._last_values = labels
+                self.log('{} NEW MOVIE OPTIONS:\n{}'
+                         .format(len(labels), labels))
                 self.call_service('input_select/set_options', entity_id=ENTITY,
                                   options=[DEFAULT_ACTION] + labels)
                 self.set_state(ENTITY,
                                attributes={"friendly_name": 'Recent Movies',
                                            "icon": 'mdi:movie'})
             elif method == 'VideoLibrary.GetRecentlyAddedEpisodes':
-                values = list(filter(lambda r: not r['lastplayed'],
-                                     result['episodes']))[:MAX_RESULTS]
+                values = result['episodes']
                 data = [('{} - {}'.format(r['showtitle'], r['label']),
-                         ('TVSHOW', r['file'])) for r in values]
-                self._ids_options.update(dict(zip(*zip(*data))))
+                         ('TVSHOW', r['file'], r['lastplayed']))
+                        for r in values]
                 labels = list(list(zip(*data))[0])
-                self.log('NEW OPTIONS:\n{}'.format(labels))
+                if not self._last_values or \
+                        not all(map(lambda x: x in labels, self._last_values)):
+                    # First press --> filter non watched episodes
+                    data = filter(lambda x: not x[1][2], data)
+                    labels = list(list(zip(*data))[0])
+                self.log('{} NEW TVSHOW OPTIONS:\n{}'
+                         .format(len(labels), labels))
+                self._ids_options.update(dict(zip(*zip(*data))))
+                self._last_values = labels
                 self.call_service('input_select/set_options', entity_id=ENTITY,
                                   options=[DEFAULT_ACTION] + labels)
                 self.set_state(ENTITY,
@@ -72,11 +83,12 @@ class DynamicKodiInputSelect(appapi.AppDaemon):
                                            "icon": 'mdi:play-circle'})
             elif method == 'PVR.GetChannels':
                 values = result['channels']
-                data = [(r['label'], ('CHANNEL', r['channelid']))
+                data = [(r['label'], ('CHANNEL', r['channelid'], None))
                         for r in values]
                 self._ids_options.update(dict(zip(*zip(*data))))
                 labels = list(list(zip(*data))[0])
-                self.log('NEW OPTIONS:\n{}'.format(labels))
+                self._last_values = labels
+                self.log('{} NEW PVR OPTIONS:\n{}'.format(len(labels), labels))
                 self.call_service('input_select/set_options', entity_id=ENTITY,
                                   options=[DEFAULT_ACTION] + labels)
                 self.set_state(ENTITY,
@@ -85,12 +97,14 @@ class DynamicKodiInputSelect(appapi.AppDaemon):
 
     # noinspection PyUnusedLocal
     def _change_selected_result(self, entity, attribute, old, new, kwargs):
-        self.log('SELECTED OPTION: {} (from {})'.format(new, old))
-        selected = self._ids_options[new]
-        if selected:
-            mediatype, file = selected
-            self.log('PLAY MEDIA: {} {} [file={}]'.format(mediatype, new, file))
-            self.call_service('media_player/play_media',
-                              entity_id=MEDIA_PLAYER,
-                              media_content_type=mediatype,
-                              media_content_id=file)
+        if new != old:
+            self.log('SELECTED OPTION: {} (from {})'.format(new, old))
+            selected = self._ids_options[new]
+            if selected:
+                mediatype, file, _last_played = selected
+                self.log('PLAY MEDIA: {} {} [file={}]'
+                         .format(mediatype, new, file))
+                self.call_service('media_player/play_media',
+                                  entity_id=MEDIA_PLAYER,
+                                  media_content_type=mediatype,
+                                  media_content_id=file)

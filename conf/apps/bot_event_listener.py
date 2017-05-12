@@ -429,7 +429,7 @@ class EventListener(appapi.AppDaemon):
         self._notify_bot_menu(self._bot_chatids[0])
 
         # TODO Remove in the future (homeassistant.start trigger is not working)
-        self.fire_event('homeassistant_start')
+        self.fire_event('ha_start')
 
     def _notify_bot_menu(self, user_id):
         self.call_service(self._bot_notifier + '/send_message',

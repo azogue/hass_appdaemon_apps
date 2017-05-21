@@ -5,17 +5,15 @@ Automation task as a AppDaemon App for Home Assistant
 Populate dinamically an `input_select` with Kodi play options
 and react when selected.
 
-It reacts to `kodi_run_method_result` events, when the used API method is:
+It reacts to `kodi_call_method_result` events, when the used API method is:
     - VideoLibrary.GetRecentlyAddedMovies
     - VideoLibrary.GetRecentlyAddedEpisodes
     - PVR.GetChannels
 """
 
 import appdaemon.appapi as appapi
-# from homeassistant.components.media_player.kodi import (
-#     EVENT_KODI_RUN_METHOD_RESULT)
-
-EVENT_KODI_RUN_METHOD = 'kodi_run_method_result'
+from homeassistant.components.media_player.kodi import (
+    EVENT_KODI_CALL_METHOD_RESULT)
 
 ENTITY = 'input_select.kodi_results'
 MEDIA_PLAYER = 'media_player.kodi'
@@ -32,7 +30,8 @@ class DynamicKodiInputSelect(appapi.AppDaemon):
 
     def initialize(self):
         """Set up appdaemon app."""
-        self.listen_event(self._receive_kodi_result, EVENT_KODI_RUN_METHOD)
+        self.listen_event(self._receive_kodi_result,
+                          EVENT_KODI_CALL_METHOD_RESULT)
         self.listen_state(self._change_selected_result, ENTITY)
 
         # Input select:
@@ -44,7 +43,7 @@ class DynamicKodiInputSelect(appapi.AppDaemon):
         result = payload_event['result']
         method = payload_event['input']['method']
 
-        if event_id == EVENT_KODI_RUN_METHOD:
+        if event_id == EVENT_KODI_CALL_METHOD_RESULT:
             if method == 'VideoLibrary.GetRecentlyAddedMovies':
                 # values = list(filter(lambda r: not r['lastplayed'],
                 #                      result['movies']))[:MAX_RESULTS]

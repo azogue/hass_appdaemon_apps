@@ -18,7 +18,7 @@ import re
 from time import time
 
 
-LOG_LEVEL = 'INFO'
+LOG_LEVEL = 'DEBUG'
 
 ##################################################
 # Colors, regexprs...
@@ -494,7 +494,7 @@ class EventListener(appapi.AppDaemon):
 
     def _exec_bot_shell_command(self, command, args, timeout=20, **kwargs):
         self.log('in shell_command_output with "{}", "{}"'
-                 .format(command, args), 'DEBUG')
+                 .format(command, args), LOG_LEVEL)
         if command == '/tvshowscron':
             user, host = 'osmc', 'rpi3osmc'
             cmd = SSH_PYTHON_ENVS_PREFIX[host].format(user)
@@ -995,8 +995,9 @@ class EventListener(appapi.AppDaemon):
     def receive_telegram_event(self, event_id, payload_event, *args):
         """Event listener for Telegram events."""
         self.log('TELEGRAM NOTIFICATION: "{}", payload={}'
-                 .format(event_id, payload_event), 'DEBUG')
-        user_id = payload_event['user_id']
+                 .format(event_id, payload_event), LOG_LEVEL)
+        # user_id = payload_event['user_id']
+        user_id = payload_event['chat_id']
         if event_id == 'telegram_command':
             command = payload_event['command']
             cmd_args = payload_event['args'] or ''
@@ -1020,7 +1021,7 @@ class EventListener(appapi.AppDaemon):
                 command, cmd_args = cmd[0], cmd[1:]
                 self.log('CALLBACK REDIRECT TO COMMAND RESPONSE: '
                          'cmd="{}", args="{}", callback_id={}'
-                         .format(command, cmd_args, callback_id), 'DEBUG')
+                         .format(command, cmd_args, callback_id), LOG_LEVEL)
                 self.process_telegram_command(command, cmd_args, user_id,
                                               callback_id=callback_id)
             elif data_callback.startswith(COMMAND_WIZARD_OPTION):  # Wizard

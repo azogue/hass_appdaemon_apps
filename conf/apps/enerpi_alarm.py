@@ -104,7 +104,7 @@ class EnerpiPeakNotifier(appapi.AppDaemon):
         self._main_power = self.args.get('control')
         conf_data = dict(self.config['AppDaemon'])
         self._notifier = conf_data.get('notifier').replace('.', '/')
-        self._notifier_bot = conf_data.get('bot_notifier').replace('.', '/')
+        self._notifier_bot = conf_data.get('bot_group').replace('.', '/')
         self._camera = self.args.get('camera')
         self._min_time_upper = int(self.args.get('min_time_high', DEFAULT_MIN_TIME_UPPER_SEC))
         self._min_time_lower = int(self.args.get('min_time_low', DEFAULT_MIN_TIME_LOWER_SEC))
@@ -193,9 +193,11 @@ class EnerpiPeakNotifier(appapi.AppDaemon):
             elif (now - self._last_trigger).total_seconds() > self._min_time_upper:
                 # TRIGGER ALARM
                 alarm_msg = self._make_ios_message()
-                self.log('TRIGGER ALARM with msg={}'.format(alarm_msg), level=LOG_LEVEL)
+                self.log('TRIGGER ALARM with msg={}'
+                         .format(alarm_msg), level=LOG_LEVEL)
                 self.call_service(self._notifier, **alarm_msg)
-                self.call_service(self._notifier_bot, **self._make_telegram_message())
+                self.call_service(self._notifier_bot,
+                                  **self._make_telegram_message())
                 self._alarm_state = True
                 self._last_trigger = now
             # else:  # wait some more time (this is the same power peak event, waiting min time to trigger alarm)
@@ -206,8 +208,12 @@ class EnerpiPeakNotifier(appapi.AppDaemon):
                 if (now - self._last_trigger).total_seconds() > self._min_time_lower:
                     self.log('RESET ALARM MODE at {}'.format(now), level=LOG_LEVEL)
                     # RESET ALARM
-                    self.call_service(self._notifier, **self._make_ios_message(reset_alarm=True))
-                    self.call_service(self._notifier_bot, **self._make_telegram_message(reset_alarm=True))
+                    self.call_service(
+                        self._notifier,
+                        **self._make_ios_message(reset_alarm=True))
+                    self.call_service(
+                        self._notifier_bot,
+                        **self._make_telegram_message(reset_alarm=True))
                     self._alarm_state = False
                     self._last_trigger = None
                     self._current_peak = 0

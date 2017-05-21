@@ -172,11 +172,6 @@ class AlarmClock(appapi.AppDaemon):
     _selected_player = None
 
     _media_player_kodi = None
-    _kodi_ip = None
-    _kodi_port = None
-    _kodi_user = None
-    _kodi_pass = None
-
     _media_player_mopidy = None
     _mopidy_ip = None
     _mopidy_port = None
@@ -213,11 +208,6 @@ class AlarmClock(appapi.AppDaemon):
             self.listen_state(self.change_player, self._room_select)
 
         self._media_player_kodi = conf_data.get('media_player')
-        self._kodi_ip = conf_data.get('kodi_ip')
-        self._kodi_port = conf_data.get('kodi_port')
-        self._kodi_user = conf_data.get('kodi_user')
-        self._kodi_pass = conf_data.get('kodi_pass')
-
         self._media_player_mopidy = conf_data.get('media_player_mopidy')
         self._mopidy_ip = conf_data.get('mopidy_ip')
         self._mopidy_port = int(conf_data.get('mopidy_port'))
@@ -231,7 +221,7 @@ class AlarmClock(appapi.AppDaemon):
         self.listen_event(
             self.postpone_secuencia_despertador, 'postponer_despertador')
         self._notifier = conf_data.get('notifier').replace('.', '/')
-        self._notifier_bot = conf_data.get('bot_notifier').replace('.', '/')
+        self._notifier_bot = conf_data.get('bot_group').replace('.', '/')
 
         self._lights_alarm = self.args.get('lights_alarm', None)
         total_duration = int(self.args.get('sunrise_duration', 60))
@@ -389,22 +379,14 @@ class AlarmClock(appapi.AppDaemon):
         """Run Kodi add-on with parameters vith JSONRPC API."""
         self.log('RUN_KODI_ADDON_LACAFETERA with mode={}'
                  .format(mode), LOG_LEVEL)
-        url_base = 'http://{}:{}/'.format(self._kodi_ip, self._kodi_port)
-        auth = (self._kodi_user, self._kodi_pass
-                ) if self._kodi_user is not None else None
-        data = {"request": json.dumps(
-            {"id": 1, "jsonrpc": "2.0", "method": "Addons.ExecuteAddon",
-             "params": {"params": {"mode": mode},
-                        "addonid": "plugin.audio.lacafetera"}})}
-        r = requests.get(url_base + 'jsonrpc', params=data, auth=auth,
-                         headers={'Content-Type': 'application/json'},
-                         timeout=5)
-        if r.ok:
-            self._in_alarm_mode = True
-            self._last_trigger = dt.datetime.now()
-            return True
-        self.log('KODI NOT PRESENT? -> {}'.format(r.content), 'ERROR')
-        return False
+        data = {"method": "Addons.ExecuteAddon",
+                "params": {"params": {"mode": mode},
+                           "addonid": "plugin.audio.lacafetera"}}
+        self.call_service("media_player/kodi_call_method",
+                          entity_id=self._media_player_kodi, **data)
+        self._in_alarm_mode = True
+        self._last_trigger = dt.datetime.now()
+        return True
 
     def run_command_mopidy(self, command='core.tracklist.get_tl_tracks',
                            params=None, check_result=True):

@@ -345,7 +345,7 @@ Funcionando desde {{states.sensor.last_boot.state}} (HASS {{relative_time(states
 # Custom shell script for capture a pic from a HASS camera:
 CMD_MAKE_HASS_PIC = '/home/homeassistant/.homeassistant/shell/capture_pic.sh ' \
                     'snapshot_cameras/{cam_filename} {img_url} {hass_pw}'
-
+PIC_STATIC_URL = '{}/local/snapshot_cameras/{}'
 
 def _clean(telegram_text):
     """Remove markdown characters to prevent
@@ -363,6 +363,7 @@ class EventListener(appapi.AppDaemon):
     _lights_notif_state = None
     _lights_notif_st_attr = None
     _notifier = None
+    _bot_name = None
     _bot_notifier = None
     _bot_wizstack = None
     _bot_chatids = None
@@ -381,6 +382,7 @@ class EventListener(appapi.AppDaemon):
         """AppDaemon required method for app init."""
         self._bot_notifier = 'mytelegram_bot'
         self._config = dict(self.config['AppDaemon'])
+        self._bot_name = '@' + self._config.get('bot_name')
         self._notifier = self._config.get('notifier').replace('.', '/')
         _chatids = [int(x) for x in self._config.get('bot_chatids').split(',')]
         _nicknames = self._config.get('bot_nicknames').split(',')
@@ -481,16 +483,15 @@ class EventListener(appapi.AppDaemon):
         -H "x-ha-access: {hass_pw}" {base_url}/api/camera_proxy/{cam_name}
         """
         file = cam_entity_id.replace('_', '') + '.jpg'
-        img_url = '{}/api/camera_proxy/{}'.format(self._config['base_url'],
-                                                  cam_entity_id)
-        cmd = CMD_MAKE_HASS_PIC.format(hass_pw=self._config['ha_key'],
-                                       img_url=img_url, cam_filename=file)
+        img_url = '{}/api/camera_proxy/camera.{}'.format(
+            self._config['base_url'], cam_entity_id)
+        cmd = CMD_MAKE_HASS_PIC.format(
+            hass_pw=self._config['ha_key'],
+            img_url=img_url, cam_filename=file)
         ok, _, _ = self._shell_command_output(cmd, timeout=5)
         if not ok:
             self.log('HASS CAM BAD PIC {} -> {}'.format(cam_entity_id, file))
-        static_url = '{}/local/snapshot_cameras/{}'.format(
-            self._config['base_url'], file)
-        return static_url
+        return PIC_STATIC_URL.format(self._config['base_url'], file)
 
     def _exec_bot_shell_command(self, command, args, timeout=20, **kwargs):
         self.log('in shell_command_output with "{}", "{}"'
@@ -654,26 +655,32 @@ class EventListener(appapi.AppDaemon):
             self.call_service(serv,
                               file='/home/homeassistant/picamera/image.jpg',
                               caption='PiCamera Salón', **msg)
-            for cam, cap in zip(['escam_qf001', 'picamera_estudio'],
-                                ['ESCAM QF001 Salón', 'PiCamera Estudio']):
+            for i, (cam, cap) in enumerate(
+                    zip(['escam_qf001', 'picamera_estudio'],
+                        ['ESCAM QF001 Salón', 'PiCamera Estudio'])):
                 static_url = self._gen_hass_cam_pics(cam)
+                if i + 1 == len(ENERPI_TILES):
+                    msg.pop("keyboard")
+                    msg["inline_keyboard"] = TELEGRAM_INLINE_KEYBOARD
+                    msg["url"] = static_url
+                    msg["caption"] = cap
+                    break
                 self.call_service(serv, url=static_url, caption=cap, **msg)
-            serv = self._bot_notifier + '/edit_replymarkup'
-            msg = {"chat_id": user_id,
-                   "message_id": 'last',
-                   'inline_keyboard': TELEGRAM_INLINE_KEYBOARD}
             prefix = 'SEND CAMERA PICS'
         elif command == '/enerpitiles':
             serv = self._bot_notifier + '/send_photo'
             msg = {"target": user_id,
                    'keyboard': TELEGRAM_KEYBOARD_ENERPI}
-            for cam, cap in zip(ENERPI_TILES, ENERPI_TILES_DESC):
+            for i, (cam, cap) in enumerate(
+                    zip(ENERPI_TILES, ENERPI_TILES_DESC)):
                 static_url = self._gen_hass_cam_pics(cam)
+                if i + 1 == len(ENERPI_TILES):
+                    msg.pop("keyboard")
+                    msg["inline_keyboard"] = TELEGRAM_INLINE_KEYBOARD_ENERPI
+                    msg["url"] = static_url
+                    msg["caption"] = cap
+                    break
                 self.call_service(serv, url=static_url, caption=cap, **msg)
-            serv = self._bot_notifier + '/edit_replymarkup'
-            msg = {"chat_id": user_id,
-                   "message_id": 'last',
-                   'inline_keyboard': TELEGRAM_INLINE_KEYBOARD_ENERPI}
             prefix = 'SEND ENERPI TILES'
         elif command == '/enerpikwh':
             cam, cap = ENERPI_TILES[0], ENERPI_TILES_DESC[0]
@@ -996,10 +1003,12 @@ class EventListener(appapi.AppDaemon):
         """Event listener for Telegram events."""
         self.log('TELEGRAM NOTIFICATION: "{}", payload={}'
                  .format(event_id, payload_event), LOG_LEVEL)
-        # user_id = payload_event['user_id']
-        user_id = payload_event['chat_id']
+        if 'chat_id' in payload_event:
+            user_id = payload_event['chat_id']
+        else:
+            user_id = payload_event['user_id']
         if event_id == 'telegram_command':
-            command = payload_event['command']
+            command = payload_event['command'].replace(self._bot_name, '')
             cmd_args = payload_event['args'] or ''
             self.process_telegram_command(command, cmd_args, user_id)
         elif event_id == 'telegram_text':
@@ -1013,7 +1022,8 @@ class EventListener(appapi.AppDaemon):
             msg_origin = payload_event['message']
             data_callback = payload_event['data']
             callback_id = payload_event['id']
-            callback_chat_instance = payload_event['chat_instance']
+            # callback_chat_instance = payload_event['chat_instance']
+            user_id = msg_origin['chat']['id']
 
             # Tipo de pulsación (wizard vs simple command):
             if data_callback.startswith(COMMAND_PREFIX):  # exec simple command

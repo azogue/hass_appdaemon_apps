@@ -38,8 +38,12 @@ STEP_RETRYING_SEC = 20
 WARM_UP_TIME_DELTA = dt.timedelta(seconds=25)
 MIN_INTERVAL_BETWEEN_EPS = dt.timedelta(hours=8)
 MASK_URL_STREAM_MOPIDY = "http://api.spreaker.com/listen/episode/{}/http"
-TELEGRAM_KEYBOARD_ALARMCLOCK = ['/ducha', '/posponer',
-                                '/despertadoroff', '/hasswiz, /init']
+# TELEGRAM_KEYBOARD_ALARMCLOCK = ['/ducha', '/posponer',
+#                                 '/despertadoroff', '/hasswiz, /init']
+TELEGRAM_INLINE_KEYBOARD_ALARMCLOCK = [
+    [('A la ducha!', '/ducha')],
+    [('Un poquito más','/posponer'),
+     ('OFF', '/despertadoroff'), ('+', '/init')]]
 WEEKDAYS_DICT = {'mon': 0, 'tue': 1, 'wed': 2,
                  'thu': 3, 'fri': 4, 'sat': 5, 'sun': 6}
 
@@ -133,8 +137,10 @@ def _make_telegram_notification_episode(ep_info):
     if img_url is not None:
         message += "\n{}\n".format(img_url)
     data_msg = {"title": title, "message": message,
-                "keyboard": TELEGRAM_KEYBOARD_ALARMCLOCK,
-                "disable_notification": True}
+                "data": {
+                    # "keyboard": TELEGRAM_KEYBOARD_ALARMCLOCK,
+                    "inline_keyboard": TELEGRAM_INLINE_KEYBOARD_ALARMCLOCK,
+                    "disable_notification": True}}
     return data_msg
 
 
@@ -380,8 +386,8 @@ class AlarmClock(appapi.AppDaemon):
         self.log('RUN_KODI_ADDON_LACAFETERA with mode={}'
                  .format(mode), LOG_LEVEL)
         data = {"method": "Addons.ExecuteAddon",
-                "params": {"params": {"mode": mode},
-                           "addonid": "plugin.audio.lacafetera"}}
+                "params": {"mode": mode},
+                "addonid": "plugin.audio.lacafetera"}
         self.call_service("media_player/kodi_call_method",
                           entity_id=self._media_player_kodi, **data)
         self._in_alarm_mode = True

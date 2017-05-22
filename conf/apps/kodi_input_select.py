@@ -65,6 +65,7 @@ class DynamicKodiInputSelect(appapi.AppDaemon):
                 data = [('{} - {}'.format(r['showtitle'], r['label']),
                          ('TVSHOW', r['file'], r['lastplayed']))
                         for r in values]
+                d_data = dict(zip(*zip(*data)))
                 labels = list(list(zip(*data))[0])
                 if not self._last_values or \
                         not all(map(lambda x: x in labels, self._last_values)):
@@ -73,7 +74,9 @@ class DynamicKodiInputSelect(appapi.AppDaemon):
                     labels = list(list(zip(*data))[0])
                 self.log('{} NEW TVSHOW OPTIONS:\n{}'
                          .format(len(labels), labels))
-                self._ids_options.update(dict(zip(*zip(*data))))
+                self._ids_options.update(d_data)
+                self.log('ids_options --> {}'.format(self._ids_options))
+
                 self._last_values = labels
                 self.call_service('input_select/set_options', entity_id=ENTITY,
                                   options=[DEFAULT_ACTION] + labels)

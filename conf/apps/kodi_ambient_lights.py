@@ -43,8 +43,13 @@ PARAMS_GET_ITEM = {
                    "starttime", "endtime"]}
 TYPE_ITEMS_NOTIFY = ['movie', 'episode']
 # TYPE_ITEMS_IGNORE = ['channel', 'unknown']  # grabaciones: 'unknown'
-TELEGRAM_KEYBOARD_KODI = ['/luceson', '/ambilighttoggle, /ambilightconfig',
-                          '/pitemps, /tvshowsnext']
+# TELEGRAM_KEYBOARD_KODI = ['/luceson', '/ambilighttoggle, /ambilightconfig',
+#                           '/pitemps, /tvshowsnext']
+TELEGRAM_INLINEKEYBOARD_KODI = [
+    [('Luces ON', '/luceson')],
+    [('Switch Ambilight', '/ambilighttoggle'),
+     ('Ch. config', '/ambilightconfig')],
+    [('Tª', '/pitemps'), ('Next TvShows', '/tvshowsnext')]]
 
 
 def _get_max_brightness_ambient_lights():
@@ -173,8 +178,10 @@ class KodiAssistant(appapi.AppDaemon):
         if img_url is not None:
             message += "\n{}\n".format(img_url)
         data_msg = {"title": title, "message": message,
-                    "keyboard": TELEGRAM_KEYBOARD_KODI,
-                    "disable_notification": True}
+                    "data": {
+                        # "keyboard": TELEGRAM_KEYBOARD_KODI,
+                        "inline_keyboard": TELEGRAM_INLINEKEYBOARD_KODI,
+                        "disable_notification": True}}
         return data_msg
 
     def _adjust_kodi_lights(self, play=True):
@@ -220,7 +227,9 @@ class KodiAssistant(appapi.AppDaemon):
                              .format(light_id, state_before), LOG_LEVEL)
 
     # noinspection PyUnusedLocal
-    def _kodi_react_to_state(self, old, new, kwargs):
+    def _kodi_react_to_state(self, kwargs):
+        old = kwargs['old']
+        new = kwargs['new']
         delta = ha.get_now() - self._last_play
         self.log('KODI START. old:{}, new:{}, is_playing_video={}'
                  .format(old, new, self._is_playing_video), LOG_LEVEL)

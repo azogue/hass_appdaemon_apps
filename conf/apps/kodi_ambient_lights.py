@@ -19,16 +19,7 @@ from homeassistant.components.media_player.kodi import (
     EVENT_KODI_CALL_METHOD_RESULT)
 
 
-# LOG_LEVEL = 'DEBUG'
-LOG_LEVEL = 'INFO'
-
-# {"method": "Player.GetItem", "entity_id": "media_player.kodi", "playerid": 1,
-# "properties": ["title", "artist", "albumartist", "genre", "year", "rating",
-# ... "dateadded", "runtime", "starttime", "endtime"]}
-# {"method": "Player.GetItem", "entity_id": "media_player.kodi", "playerid": 1, "properties": ["title", "artist", "albumartist", "genre", "year", "rating", "album", "track", "duration", "playcount", "fanart", "plot", "originaltitle", "lastplayed", "firstaired", "season", "episode", "showtitle", "thumbnail", "file", "tvshowid", "watchedepisodes", "art", "description", "theme", "dateadded", "runtime", "starttime", "endtime"]}
-# {"method": "Player.GetPlayers", "entity_id": "media_player.kodi"}
-
-# {"method": "Player.GetItem", "entity_id": "media_player.kodi", "playerid": "1"}
+LOG_LEVEL = 'DEBUG'
 
 METHOD_GET_PLAYERS = "Player.GetPlayers"
 METHOD_GET_ITEM = "Player.GetItem"
@@ -43,8 +34,8 @@ PARAMS_GET_ITEM = {
                    "starttime", "endtime"]}
 TYPE_ITEMS_NOTIFY = ['movie', 'episode']
 # TYPE_ITEMS_IGNORE = ['channel', 'unknown']  # grabaciones: 'unknown'
-# TELEGRAM_KEYBOARD_KODI = ['/luceson', '/ambilighttoggle, /ambilightconfig',
-#                           '/pitemps, /tvshowsnext']
+TELEGRAM_KEYBOARD_KODI = ['/luceson', '/ambilighttoggle, /ambilightconfig',
+                          '/pitemps, /tvshowsnext']
 TELEGRAM_INLINEKEYBOARD_KODI = [
     [('Luces ON', '/luceson')],
     [('Switch Ambilight', '/ambilighttoggle'),
@@ -70,12 +61,9 @@ class KodiAssistant(appapi.AppDaemon):
     _lights_off = None
 
     _media_player = None
-    _kodi_ip = None
-    _kodi_url = None
-    _kodi_auth = None
-
     _notifier = None
     _notifier_bot = None
+    _notifier_bot_target = None
 
     _light_states = {}
     _is_playing_video = False
@@ -90,9 +78,12 @@ class KodiAssistant(appapi.AppDaemon):
         conf_data = dict(self.config['AppDaemon'])
         self._media_player = conf_data.get('media_player')
         self._notifier = conf_data.get('notifier').replace('.', '/')
-        self._notifier_bot = conf_data.get('bot_group').replace('.', '/')
+        # self._notifier_bot = conf_data.get('bot_group').replace('.', '/')
+        self._notifier_bot = 'mytelegram_bot'
+        self._notifier_bot_target = int(conf_data.get('bot_group_target'))
 
         # Listen for Kodi changes:
+        self._last_play = ha.get_now()
         self.listen_state(self.kodi_state, self._media_player)
         self.listen_event(self._receive_kodi_result,
                           EVENT_KODI_CALL_METHOD_RESULT)
@@ -112,12 +103,19 @@ class KodiAssistant(appapi.AppDaemon):
                 and method == METHOD_GET_ITEM:
             self.log('DEBUG RECEIVE KODI IN AMBIENT LIGHTS: {}'.format(result))
             if 'item' in result:
-                item_playing = result['item']
-                self._is_playing_video = item_playing['type'] == 'video'
-                if ((self._item_playing is None) or
-                        (self._item_playing != item_playing)):
-                    self._item_playing = item_playing
+                item = result['item']
+                new_video = self._item_playing is None or \
+                            (self._item_playing != item)
+                self._is_playing_video = item['type'] in TYPE_ITEMS_NOTIFY
+                self._item_playing = item
+                delta = ha.get_now() - self._last_play
+                if (self._is_playing_video and
+                        (new_video or delta > dt.timedelta(minutes=5))):
                     self._last_play = ha.get_now()
+                    self._adjust_kodi_lights(play=True)
+                    # Notifications
+                    self._notify_ios_message(self._item_playing)
+                    self._notify_telegram_message(self._item_playing)
             else:
                 self.log('RECEIVED BAD KODI RESULT: {}'
                          .format(result), 'warning')
@@ -126,6 +124,30 @@ class KodiAssistant(appapi.AppDaemon):
             self.log('KODI GET_PLAYERS RECEIVED: {}'.format(result))
 
     def _get_kodi_info_params(self, item):
+        """
+        supported_features: 55103
+        media_content_id: {
+          "unknown": "304004"
+        }
+        entity_picture: /api/media_player_proxy/media_player.kodi?token
+        =294207b6efe7900727e49c15bd5ca5d5347a4001d11e35461392633d5e0d1348&cache=49334
+        friendly_name: Kodi OSMC
+        media_duration: 1297
+        media_title: The One Where Chandler Takes A Bath
+        media_album_name:
+        volume_level: 1
+        icon: mdi:kodi
+        media_season: 8
+        media_episode: 13
+        is_volume_muted: false
+        media_series_title: Friends
+        media_content_type: tvshow
+        homebridge_hidden: true
+
+
+        :param item:
+        :return:
+        """
         if item['type'] == 'episode':
             title = "{} S{:02d}E{:02d} {}".format(
                 item['showtitle'], item['season'],
@@ -152,7 +174,7 @@ class KodiAssistant(appapi.AppDaemon):
                 raw_img_url = item['art'][k]
             img_url = parse.unquote_plus(
                 raw_img_url).rstrip('/').lstrip('image://')
-            if (self._kodi_ip not in img_url) \
+            if ('192.168.' not in img_url) \
                     and img_url.startswith('http://'):
                 img_url = img_url.replace('http:', 'https:')
             self.log('MESSAGE: T={}, M={}, URL={}'
@@ -161,7 +183,7 @@ class KodiAssistant(appapi.AppDaemon):
             self.log('MESSAGE KeyError: {}; item={}'.format(e, item))
         return title, message, img_url
 
-    def _make_ios_message(self, item):
+    def _notify_ios_message(self, item):
         title, message, img_url = self._get_kodi_info_params(item)
         if img_url is not None:
             data_msg = {"title": title, "message": message,
@@ -170,19 +192,23 @@ class KodiAssistant(appapi.AppDaemon):
         else:
             data_msg = {"title": title, "message": message,
                         "data": {"push": {"category": "KODIPLAY"}}}
-        return data_msg
+        self.call_service(self._notifier, **data_msg)
 
-    def _make_telegram_message(self, item):
+    def _notify_telegram_message(self, item):
         title, message, img_url = self._get_kodi_info_params(item)
-        title = '*{}*'.format(title)
         if img_url is not None:
-            message += "\n{}\n".format(img_url)
-        data_msg = {"title": title, "message": message,
-                    "data": {
-                        # "keyboard": TELEGRAM_KEYBOARD_KODI,
-                        "inline_keyboard": TELEGRAM_INLINEKEYBOARD_KODI,
-                        "disable_notification": True}}
-        return data_msg
+            data_photo = {
+                "url": img_url,
+                "keyboard": TELEGRAM_KEYBOARD_KODI,
+                "disable_notification": True}
+            self.call_service('{}/send_photo'.format(self._notifier_bot),
+                              target=self._notifier_bot_target, **data_photo)
+            message + "\n{}\nEND".format(img_url)
+        data_msg = {"message": message, "title": '*{}*'.format(title),
+                    "inline_keyboard": TELEGRAM_INLINEKEYBOARD_KODI,
+                    "disable_notification": True}
+        self.call_service('{}/send_message'.format(self._notifier_bot),
+                          target=self._notifier_bot_target, **data_msg)
 
     def _adjust_kodi_lights(self, play=True):
         for light_id in self._lights_dim + self._lights_off:
@@ -227,31 +253,19 @@ class KodiAssistant(appapi.AppDaemon):
                              .format(light_id, state_before), LOG_LEVEL)
 
     # noinspection PyUnusedLocal
-    def _kodi_react_to_state(self, kwargs):
-        old = kwargs['old']
-        new = kwargs['new']
-        delta = ha.get_now() - self._last_play
-        self.log('KODI START. old:{}, new:{}, is_playing_video={}'
-                 .format(old, new, self._is_playing_video), LOG_LEVEL)
-        if (self._is_playing_video
-                and delta < dt.timedelta(seconds=15)
-                and self._item_playing['type'] in TYPE_ITEMS_NOTIFY):
-            self._adjust_kodi_lights(play=True)
-            # Notifications
-            self.call_service(
-                self._notifier,
-                **self._make_ios_message(self._item_playing))
-            self.call_service(
-                self._notifier_bot,
-                **self._make_telegram_message(self._item_playing))
-
-    # noinspection PyUnusedLocal
     def kodi_state(self, entity, attribute, old, new, kwargs):
         """Kodi state change main control."""
         if new == 'playing':
             self._ask_for_playing_item()
-            self.run_in(self._kodi_react_to_state, 5, new=new, old=old)
-        elif (old == 'playing') and (new == 'idle') and self._is_playing_video:
+            kodi_attrs = self.get_state(
+                entity_id=self._media_player, attribute="attributes")
+            self._is_playing_video = 'media_content_type' in kodi_attrs \
+                                     and kodi_attrs['media_content_type'] \
+                                     == 'tvshow'
+            self.log('KODI ATTRS: {}, is_playing_video={}'
+                     .format(kodi_attrs, self._is_playing_video))
+
+        elif ((new == 'idle') and self._is_playing_video) or (new == 'off'):
             self._is_playing_video = False
             self._last_play = ha.get_now()
             self.log('KODI STOP. old:{}, new:{}, type_lp={}'

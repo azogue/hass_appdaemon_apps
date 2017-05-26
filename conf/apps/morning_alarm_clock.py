@@ -41,9 +41,9 @@ MASK_URL_STREAM_MOPIDY = "http://api.spreaker.com/listen/episode/{}/http"
 # TELEGRAM_KEYBOARD_ALARMCLOCK = ['/ducha', '/posponer',
 #                                 '/despertadoroff', '/hasswiz, /init']
 TELEGRAM_INLINE_KEYBOARD_ALARMCLOCK = [
-    [('A la ducha!', '/ducha')],
-    [('Un poquito más','/posponer'),
-     ('OFF', '/despertadoroff'), ('+', '/init')]]
+    [('A la ducha!', '/ducha'),
+     ('Calefactor', '/service_call switch.toggle switch.calefactor')],
+    [('Un poquito +', '/posponer'), ('OFF', '/despertadoroff')]]
 WEEKDAYS_DICT = {'mon': 0, 'tue': 1, 'wed': 2,
                  'thu': 3, 'fri': 4, 'sat': 5, 'sun': 6}
 
@@ -137,10 +137,9 @@ def _make_telegram_notification_episode(ep_info):
     if img_url is not None:
         message += "\n{}\n".format(img_url)
     data_msg = {"title": title, "message": message,
-                "data": {
-                    # "keyboard": TELEGRAM_KEYBOARD_ALARMCLOCK,
-                    "inline_keyboard": TELEGRAM_INLINE_KEYBOARD_ALARMCLOCK,
-                    "disable_notification": True}}
+                # "keyboard": TELEGRAM_KEYBOARD_ALARMCLOCK,
+                "inline_keyboard": TELEGRAM_INLINE_KEYBOARD_ALARMCLOCK,
+                "disable_notification": True}
     return data_msg
 
 
@@ -168,6 +167,7 @@ class AlarmClock(appapi.AppDaemon):
     _weekdays_alarm = None
     _notifier = None
     _notifier_bot = None
+    _notifier_bot_target = None
     _transit_time = None
     _phases_sunrise = []
     _tz = None
@@ -227,7 +227,9 @@ class AlarmClock(appapi.AppDaemon):
         self.listen_event(
             self.postpone_secuencia_despertador, 'postponer_despertador')
         self._notifier = conf_data.get('notifier').replace('.', '/')
-        self._notifier_bot = conf_data.get('bot_group').replace('.', '/')
+        # TODO Eliminar al usar general:
+        self._notifier_bot = 'mytelegram_bot'
+        self._notifier_bot_target = int(conf_data.get('bot_group_target'))
 
         self._lights_alarm = self.args.get('lights_alarm', None)
         total_duration = int(self.args.get('sunrise_duration', 60))
@@ -244,15 +246,17 @@ class AlarmClock(appapi.AppDaemon):
         """Boolean for select each player (Kodi / Mopidy)."""
         return 'KODI' in self._selected_player.upper()
 
-    def turn_on_morning_services(self, delta_to_repeat=None):
+    def turn_on_morning_services(self, kwargs):
         """Turn ON the water boiler and so on in the morning."""
         self.call_service('switch/turn_on', entity_id="switch.caldera")
-        if delta_to_repeat is not None:
-            self.run_in(self.turn_on_morning_services, delta_to_repeat)
+        if 'delta_to_repeat' in kwargs:
+            self.run_in(self.turn_on_morning_services,
+                        kwargs['delta_to_repeat'])
 
     def notify_alarmclock(self, ep_info):
         """Send notification with episode info."""
-        self.call_service(self._notifier_bot.replace('.', '/'),
+        self.call_service('{}/send_message'.format(self._notifier_bot),
+                          target=self._notifier_bot_target,
                           **_make_telegram_notification_episode(ep_info))
         self.call_service(self._notifier.replace('.', '/'),
                           **_make_ios_notification_episode(ep_info))
@@ -471,7 +475,7 @@ class AlarmClock(appapi.AppDaemon):
 
         (turn on devices, get ready the context, etc)"""
         self.log('PREPARE_CONTEXT_ALARM', LOG_LEVEL)
-        self.turn_on_morning_services(delta_to_repeat=10)
+        self.turn_on_morning_services(dict(delta_to_repeat=10))
         if self.play_in_kodi:
             return self.run_kodi_addon_lacafetera(mode='wakeup')
         else:
@@ -488,7 +492,7 @@ class AlarmClock(appapi.AppDaemon):
         alarm_ready, alarm_info = is_last_episode_ready_for_play(
             self.datetime(), self._tz)
         if alarm_ready:
-            self.turn_on_morning_services(delta_to_repeat=30)
+            self.turn_on_morning_services(dict(delta_to_repeat=30))
             if self.play_in_kodi:
                 ok = self.run_kodi_addon_lacafetera()
             else:

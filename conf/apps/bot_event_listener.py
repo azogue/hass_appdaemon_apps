@@ -11,6 +11,7 @@ Harcoded custom logic for controlling HA with feedback from these actions.
 import appdaemon.appapi as appapi
 import appdaemon.conf as conf
 import datetime as dt
+import json
 import paramiko
 import subprocess
 from random import randrange
@@ -126,7 +127,7 @@ TELEGRAM_SHELL_CMDS = ['/shell', '/osmc', '/osmcmail', '/rpi2', '/rpi2h',
                        '/cathass', '/catappd', '/catappderr', '/tvshowscron',
                        '/tvshowsinfo', '/tvshowsdd', '/tvshowsnext']
 TELEGRAM_HASS_CMDS = ['/getcams', '/status', '/hastatus', '/html', '/template',
-                      '/help', '/start',
+                      '/service_call', '/help', '/start',
                       '/enerpi', '/enerpifact', '/enerpitiles',
                       '/enerpikwh', '/enerpipower', '/init', '/hasswiz']
 TELEGRAM_IOS_COMMANDS = {  # AWAY category
@@ -610,6 +611,28 @@ class EventListener(appapi.AppDaemon):
                        message='_Say something to me_, *my master*',
                        inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
                        disable_notification=False)
+        elif command == '/service_call':
+            # /service_call switch.turn_off switch.kodi_tv_salon
+            prefix = 'HASS SERVICE CALL'
+            msg = dict(target=user_id,
+                       message="*Bad service call*: %s" % cmd_args,
+                       inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
+                       disable_notification=False)
+            if cmd_args:
+                serv = cmd_args[0].replace('.', '/')
+                if len(cmd_args) == 2:
+                    if cmd_args[1][0] == '{':
+                        msg = json.loads(' '.join(cmd_args[1:]))
+                    else:
+                        msg = {'entity_id': cmd_args[1].lstrip('entity_id=')}
+                elif len(cmd_args) > 2:
+                    msg['entity_id'] = cmd_args[1]
+                    if cmd_args[2][0] == '{':
+                        msg = json.loads(' '.join(cmd_args[2:]))
+                    else:
+                        self.error('Service call bad args (no JSON): %s',
+                                   cmd_args)
+            self.log('Generic Service call: {}({})'.format(serv, msg))
         elif command == '/status':
             # multiple messaging:
             msg = dict(title=CMD_STATUS_TITLE, message=CMD_STATUS_TEMPL_SALON,

@@ -118,7 +118,7 @@ class KodiAssistant(appapi.AppDaemon):
                     self._notify_telegram_message(self._item_playing)
             else:
                 self.log('RECEIVED BAD KODI RESULT: {}'
-                         .format(result), 'warning')
+                         .format(result), 'warn')
         elif event_id == EVENT_KODI_CALL_METHOD_RESULT \
                 and method == METHOD_GET_PLAYERS:
             self.log('KODI GET_PLAYERS RECEIVED: {}'.format(result))
@@ -256,7 +256,6 @@ class KodiAssistant(appapi.AppDaemon):
     def kodi_state(self, entity, attribute, old, new, kwargs):
         """Kodi state change main control."""
         if new == 'playing':
-            self._ask_for_playing_item()
             kodi_attrs = self.get_state(
                 entity_id=self._media_player, attribute="attributes")
             self._is_playing_video = 'media_content_type' in kodi_attrs \
@@ -264,7 +263,8 @@ class KodiAssistant(appapi.AppDaemon):
                                      == 'tvshow'
             self.log('KODI ATTRS: {}, is_playing_video={}'
                      .format(kodi_attrs, self._is_playing_video))
-
+            if self._is_playing_video:
+                self._ask_for_playing_item()
         elif ((new == 'idle') and self._is_playing_video) or (new == 'off'):
             self._is_playing_video = False
             self._last_play = ha.get_now()

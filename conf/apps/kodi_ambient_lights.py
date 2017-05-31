@@ -8,7 +8,7 @@ initial state when the playback is finished.
 
 In addition, it also sends notifications when starting the video playback,
 reporting the video info in the message.
-For that, it talks with Kodi through its JSONRPC API
+For that, it talks with Kodi through its JSONRPC API by HA service calls.
 
 """
 import datetime as dt
@@ -57,29 +57,37 @@ def _get_max_brightness_ambient_lights():
 class KodiAssistant(appapi.AppDaemon):
     """App for Ambient light control when playing video with KODI."""
 
-    _lights_dim = None
-    _lights_off = None
+    _lights = None
+    _light_states = {}
 
     _media_player = None
-    _notifier = None
-    _notifier_bot = None
-    _notifier_bot_target = None
-
-    _light_states = {}
     _is_playing_video = False
     _item_playing = None
     _last_play = None
 
+    _ios_notifier = None
+    _notifier_bot = None
+    _notifier_bot_target = None
+
     def initialize(self):
         """AppDaemon required method for app init."""
-        self._lights_dim = self.args.get('lights_dim', '').split(',')
-        self._lights_off = self.args.get('lights_off', '').split(',')
-
         conf_data = dict(self.config['AppDaemon'])
+
+        _lights_dim_on = self.args.get('lights_dim_on', '').split(',')
+        _lights_dim_off = self.args.get('lights_dim_off', '').split(',')
+        _lights_off = self.args.get('lights_off', '').split(',')
+        _switch_dim_group = self.args.get('switch_dim_lights_use')
+        self._lights = {"dim": {"on": _lights_dim_on, "off": _lights_dim_off},
+                        "off": _lights_off,
+                        "state": self.get_state(_switch_dim_group)}
+        # Listen for ambilight changes to change light dim group:
+        self.listen_state(self.ch_dim_lights_group, _switch_dim_group)
+
         self._media_player = conf_data.get('media_player')
-        self._notifier = conf_data.get('notifier').replace('.', '/')
-        # self._notifier_bot = conf_data.get('bot_group').replace('.', '/')
+        self._ios_notifier = conf_data.get('notifier').replace('.', '/')
+        # TODO cambiar a telegram_bot
         self._notifier_bot = 'mytelegram_bot'
+        # self._notifier_bot = conf_data.get('bot_group').replace('.', '/')
         self._notifier_bot_target = int(conf_data.get('bot_group_target'))
 
         # Listen for Kodi changes:
@@ -87,8 +95,10 @@ class KodiAssistant(appapi.AppDaemon):
         self.listen_state(self.kodi_state, self._media_player)
         self.listen_event(self._receive_kodi_result,
                           EVENT_KODI_CALL_METHOD_RESULT)
-        self.log('KodiAssist Initialized with dim_lights={}, off_lights={}'
-                 .format(self._lights_dim, self._lights_off))
+        self.log('KodiAssist Initialized with dim_lights_on={}, '
+                 'dim_lights_off={}, off_lights={}.'
+                 .format(self._lights['dim']['on'], self._lights['dim']['off'],
+                         self._lights['off']))
 
     def _ask_for_playing_item(self):
         self.call_service('media_player/kodi_call_method',
@@ -104,13 +114,13 @@ class KodiAssistant(appapi.AppDaemon):
             self.log('DEBUG RECEIVE KODI IN AMBIENT LIGHTS: {}'.format(result))
             if 'item' in result:
                 item = result['item']
-                new_video = self._item_playing is None or \
-                            (self._item_playing != item)
+                new_video = (self._item_playing is None
+                             or self._item_playing != item)
                 self._is_playing_video = item['type'] in TYPE_ITEMS_NOTIFY
                 self._item_playing = item
                 delta = ha.get_now() - self._last_play
                 if (self._is_playing_video and
-                        (new_video or delta > dt.timedelta(minutes=5))):
+                        (new_video or delta > dt.timedelta(minutes=20))):
                     self._last_play = ha.get_now()
                     self._adjust_kodi_lights(play=True)
                     # Notifications
@@ -125,28 +135,18 @@ class KodiAssistant(appapi.AppDaemon):
 
     def _get_kodi_info_params(self, item):
         """
-        supported_features: 55103
         media_content_id: {
           "unknown": "304004"
         }
-        entity_picture: /api/media_player_proxy/media_player.kodi?token
-        =294207b6efe7900727e49c15bd5ca5d5347a4001d11e35461392633d5e0d1348&cache=49334
-        friendly_name: Kodi OSMC
+        entity_picture: /api/media_player_proxy/media_player.kodi?token=...
         media_duration: 1297
         media_title: The One Where Chandler Takes A Bath
         media_album_name:
-        volume_level: 1
-        icon: mdi:kodi
         media_season: 8
         media_episode: 13
         is_volume_muted: false
         media_series_title: Friends
         media_content_type: tvshow
-        homebridge_hidden: true
-
-
-        :param item:
-        :return:
         """
         if item['type'] == 'episode':
             title = "{} S{:02d}E{:02d} {}".format(
@@ -192,7 +192,7 @@ class KodiAssistant(appapi.AppDaemon):
         else:
             data_msg = {"title": title, "message": message,
                         "data": {"push": {"category": "KODIPLAY"}}}
-        self.call_service(self._notifier, **data_msg)
+        self.call_service(self._ios_notifier, **data_msg)
 
     def _notify_telegram_message(self, item):
         title, message, img_url = self._get_kodi_info_params(item)
@@ -211,14 +211,15 @@ class KodiAssistant(appapi.AppDaemon):
                           target=self._notifier_bot_target, **data_msg)
 
     def _adjust_kodi_lights(self, play=True):
-        for light_id in self._lights_dim + self._lights_off:
+        k_l = self._lights['dim'][self._lights['state']] + self._lights['off']
+        for light_id in k_l:
             if play:
                 light_state = self.get_state(light_id)
                 attrs_light = self.get_state(light_id, attribute='attributes')
                 attrs_light.update({"state": light_state})
                 self._light_states[light_id] = attrs_light
                 max_brightness = _get_max_brightness_ambient_lights()
-                if light_id in self._lights_off:
+                if light_id in self._lights['off']:
                     self.log('Apagando light {} para KODI PLAY'
                              .format(light_id), LOG_LEVEL)
                     self.call_service(
@@ -258,9 +259,9 @@ class KodiAssistant(appapi.AppDaemon):
         if new == 'playing':
             kodi_attrs = self.get_state(
                 entity_id=self._media_player, attribute="attributes")
-            self._is_playing_video = 'media_content_type' in kodi_attrs \
-                                     and kodi_attrs['media_content_type'] \
-                                     == 'tvshow'
+            self._is_playing_video = (
+                'media_content_type' in kodi_attrs
+                and kodi_attrs['media_content_type'] == 'tvshow')
             self.log('KODI ATTRS: {}, is_playing_video={}'
                      .format(kodi_attrs, self._is_playing_video))
             if self._is_playing_video:
@@ -270,5 +271,12 @@ class KodiAssistant(appapi.AppDaemon):
             self._last_play = ha.get_now()
             self.log('KODI STOP. old:{}, new:{}, type_lp={}'
                      .format(old, new, type(self._last_play)), LOG_LEVEL)
-            self._item_playing = None
+            # self._item_playing = None
             self._adjust_kodi_lights(play=False)
+
+    # noinspection PyUnusedLocal
+    def ch_dim_lights_group(self, entity, attribute, old, new, kwargs):
+        """Change dim lights group with the change in the ambilight switch."""
+        self._lights['state'] = new
+        self.log('Dim Lights group changed from {} to {}'
+                 .format(self._lights['dim'][old], self._lights['dim'][new]))

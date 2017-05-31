@@ -340,8 +340,8 @@ class AlarmClock(appapi.AppDaemon):
     # noinspection PyUnusedLocal
     def _set_new_alarm_time(self, *args):
         if self._handle_alarm is not None:
-            self.log('Cancelling timer "{}" -> {}'
-                     .format(self._handle_alarm, self._next_alarm), LOG_LEVEL)
+            # self.log('Cancelling timer "{}" -> {}'
+            #          .format(self._handle_alarm, self._next_alarm), LOG_LEVEL)
             self.cancel_timer(self._handle_alarm)
         str_time_alarm = self.get_state(entity_id=self._alarm_time_sensor)
         if ':' not in str_time_alarm:
@@ -353,8 +353,8 @@ class AlarmClock(appapi.AppDaemon):
         self._next_alarm = time_alarm - WARM_UP_TIME_DELTA
         self._handle_alarm = self.run_daily(
             self.run_alarm, self._next_alarm.time())
-        self.log('Creating timer for {} --> {}'
-                 .format(self._next_alarm, self._handle_alarm), LOG_LEVEL)
+        # self.log('Creating timer for {} --> {}'
+        #          .format(self._next_alarm, self._handle_alarm), LOG_LEVEL)
 
     def _set_sunrise_phase(self, *args_runin):
         self.log('SET_SUNRISE_PHASE: XY={xy_color}, '
@@ -362,8 +362,8 @@ class AlarmClock(appapi.AppDaemon):
                  .format(**args_runin[0]), 'DEBUG')
         if self._in_alarm_mode:
             self.call_service('light/turn_on', **args_runin[0])
-        else:
-            self.log('ABORTED SET SUNRISE PHASE')
+        # else:
+        #     self.log('ABORTED SET SUNRISE PHASE')
 
     # noinspection PyUnusedLocal
     def turn_on_lights_as_sunrise(self, *args):
@@ -489,45 +489,49 @@ class AlarmClock(appapi.AppDaemon):
 
         Launch if ready, or set itself to retry in the short future."""
         # Check if alarm is ready to launch
-        alarm_ready, alarm_info = is_last_episode_ready_for_play(
-            self.datetime(), self._tz)
-        if alarm_ready:
-            self.turn_on_morning_services(dict(delta_to_repeat=30))
-            if self.play_in_kodi:
-                ok = self.run_kodi_addon_lacafetera()
+        if not self._in_alarm_mode:
+            alarm_ready, alarm_info = is_last_episode_ready_for_play(
+                self.datetime(), self._tz)
+            if alarm_ready:
+                self.turn_on_morning_services(dict(delta_to_repeat=30))
+                if self.play_in_kodi:
+                    ok = self.run_kodi_addon_lacafetera()
+                else:
+                    ok = self.run_mopidy_stream_lacafetera(alarm_info)
+                self.turn_on_lights_as_sunrise()
+                # Notification:
+                self.notify_alarmclock(alarm_info)
+                self.set_state(self._manual_trigger, state='on')
+                if alarm_info['duration'] is not None:
+                    duration = alarm_info['duration'].total_seconds() + 20
+                    self._handler_turnoff = self.run_in(self.turn_off_alarm_clock,
+                                                        int(duration))
+                    self.log('ALARM RUNNING NOW. AUTO STANDBY PROGRAMMED '
+                             'IN {:.0f} SECONDS'.format(duration), LOG_LEVEL)
+                elif not self.play_in_kodi:
+                    self._handler_turnoff = self.listen_state(
+                        self.turn_off_alarm_clock, self._media_player_mopidy,
+                        new="off", duration=20)
             else:
-                ok = self.run_mopidy_stream_lacafetera(alarm_info)
-            self.turn_on_lights_as_sunrise()
-            # Notification:
-            self.notify_alarmclock(alarm_info)
-            self.set_state(self._manual_trigger, state='on')
-            if alarm_info['duration'] is not None:
-                duration = alarm_info['duration'].total_seconds() + 20
-                self._handler_turnoff = self.run_in(self.turn_off_alarm_clock,
-                                                    int(duration))
-                self.log('ALARM RUNNING NOW. AUTO STANDBY PROGRAMMED '
-                         'IN {:.0f} SECONDS'.format(duration), LOG_LEVEL)
-            elif not self.play_in_kodi:
-                self._handler_turnoff = self.listen_state(
-                    self.turn_off_alarm_clock, self._media_player_mopidy,
-                    new="off", duration=20)
-        else:
-            self.log('POSTPONE ALARM', LOG_LEVEL)
-            self.run_in(self.trigger_service_in_alarm, STEP_RETRYING_SEC)
+                self.log('POSTPONE ALARM', LOG_LEVEL)
+                self.run_in(self.trigger_service_in_alarm, STEP_RETRYING_SEC)
 
     # noinspection PyUnusedLocal
     def run_alarm(self, *args):
         """Run the alarm main secuence: prepare, trigger & schedule next"""
-        self.set_state(self._manual_trigger, state='off')
-        if self.datetime().weekday() in self._weekdays_alarm:
-            ok = self.prepare_context_alarm()
-            self.run_in(self.trigger_service_in_alarm,
-                        WARM_UP_TIME_DELTA.total_seconds())
+        if not self.get_state(self._manual_trigger) == 'on':
+            self.set_state(self._manual_trigger, state='off')
+            if self.datetime().weekday() in self._weekdays_alarm:
+                ok = self.prepare_context_alarm()
+                self.run_in(self.trigger_service_in_alarm,
+                            WARM_UP_TIME_DELTA.total_seconds())
+            else:
+                self.log('ALARM CLOCK NOT TRIGGERED TODAY '
+                         '(weekday={}, alarm weekdays={})'
+                         .format(self.datetime().weekday(), self._weekdays_alarm))
+                self.run_in(self.turn_on_morning_services, 1800, delta_to_repeat=10)
         else:
-            self.log('ALARM CLOCK NOT TRIGGERED TODAY '
-                     '(weekday={}, alarm weekdays={})'
-                     .format(self.datetime().weekday(), self._weekdays_alarm))
-            self.run_in(self.turn_on_morning_services, 1800, delta_to_repeat=10)
+            self.log('Alarm clock is running manually, no auto-triggering now')
 
     # noinspection PyUnusedLocal
     def postpone_secuencia_despertador(self, *args):

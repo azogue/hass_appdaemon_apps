@@ -65,9 +65,9 @@ class KodiAssistant(appapi.AppDaemon):
     _item_playing = None
     _last_play = None
 
-    _ios_notifier = None
-    _notifier_bot = None
+    _notifier_bot = 'telegram_bot'
     _notifier_bot_target = None
+    _ios_notifier = None
 
     def initialize(self):
         """AppDaemon required method for app init."""
@@ -85,9 +85,6 @@ class KodiAssistant(appapi.AppDaemon):
 
         self._media_player = conf_data.get('media_player')
         self._ios_notifier = conf_data.get('notifier').replace('.', '/')
-        # TODO cambiar a telegram_bot
-        self._notifier_bot = 'mytelegram_bot'
-        # self._notifier_bot = conf_data.get('bot_group').replace('.', '/')
         self._notifier_bot_target = int(conf_data.get('bot_group_target'))
 
         # Listen for Kodi changes:

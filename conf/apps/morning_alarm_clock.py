@@ -166,7 +166,7 @@ class AlarmClock(appapi.AppDaemon):
     _volume_ramp_sec = None
     _weekdays_alarm = None
     _notifier = None
-    _notifier_bot = None
+    _notifier_bot = 'telegram_bot'
     _notifier_bot_target = None
     _transit_time = None
     _phases_sunrise = []
@@ -227,8 +227,6 @@ class AlarmClock(appapi.AppDaemon):
         self.listen_event(
             self.postpone_secuencia_despertador, 'postponer_despertador')
         self._notifier = conf_data.get('notifier').replace('.', '/')
-        # TODO Eliminar al usar general:
-        self._notifier_bot = 'mytelegram_bot'
         self._notifier_bot_target = int(conf_data.get('bot_group_target'))
 
         self._lights_alarm = self.args.get('lights_alarm', None)

@@ -364,8 +364,9 @@ class EventListener(appapi.AppDaemon):
     _lights_notif_state = None
     _lights_notif_st_attr = None
     _notifier = None
+
+    _bot_notifier = 'telegram_bot'
     _bot_name = None
-    _bot_notifier = None
     _bot_wizstack = None
     _bot_chatids = None
     _bot_users = None
@@ -381,7 +382,6 @@ class EventListener(appapi.AppDaemon):
 
     def initialize(self):
         """AppDaemon required method for app init."""
-        self._bot_notifier = 'mytelegram_bot'
         self._config = dict(self.config['AppDaemon'])
         self._bot_name = '@' + self._config.get('bot_name')
         self._notifier = self._config.get('notifier').replace('.', '/')

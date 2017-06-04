@@ -33,6 +33,7 @@ PARAMS_GET_ITEM = {
                    "art", "description", "theme", "dateadded", "runtime",
                    "starttime", "endtime"]}
 TYPE_ITEMS_NOTIFY = ['movie', 'episode']
+TYPE_HA_ITEMS_NOTIFY = ['tvshow', 'movie']
 # TYPE_ITEMS_IGNORE = ['channel', 'unknown']  # grabaciones: 'unknown'
 TELEGRAM_KEYBOARD_KODI = ['/luceson', '/ambilighttoggle, /ambilightconfig',
                           '/pitemps, /tvshowsnext']
@@ -258,7 +259,7 @@ class KodiAssistant(appapi.AppDaemon):
                 entity_id=self._media_player, attribute="attributes")
             self._is_playing_video = (
                 'media_content_type' in kodi_attrs
-                and kodi_attrs['media_content_type'] == 'tvshow')
+                and kodi_attrs['media_content_type'] in TYPE_HA_ITEMS_NOTIFY)
             self.log('KODI ATTRS: {}, is_playing_video={}'
                      .format(kodi_attrs, self._is_playing_video))
             if self._is_playing_video:

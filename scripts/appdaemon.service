@@ -14,12 +14,10 @@ Description=My AppDaemon service for Home Assistant
 
 [Service]
 # RPI2 - Slave HASS:
-# ExecStart=/srv/homeassistant/bin/appdaemon -c /home/homeassistant/appdaemon_apps/appdaemon_slave.cfg
-# ExecStart=/srv/homeassistant/bin/appdaemon -c /home/homeassistant/appdaemon_apps/appdaemon_slave_mpd.cfg
+# ExecStart=/srv/homeassistant/bin/appdaemon -c /home/homeassistant/appdaemon_apps
 # RPI3 - Master HASS:
-# ExecStart=/srv/homeassistant/bin/appdaemon -c /home/homeassistant/appdaemon_apps/appdaemon.cfg
 ExecStartPre=source /home/homeassistant/.pyenv/versions/hass35/bin/activate
-ExecStart=/home/homeassistant/.pyenv/versions/3.5.2/envs/hass35/bin/appdaemon -c /home/homeassistant/appdaemon_apps/appdaemon.cfg
+ExecStart=/home/homeassistant/.pyenv/versions/3.5.2/envs/hass35/bin/appdaemon -c /home/homeassistant/appdaemon_apps
 RestartSec=10
 Restart=on-failure
 

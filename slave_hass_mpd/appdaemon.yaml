@@ -1,0 +1,21 @@
+AppDaemon:
+  app_dir: /home/homeassistant/appdaemon_apps/apps
+  errorfile: /home/homeassistant/appdaemon_err.log
+  logfile: /home/homeassistant/appdaemon.log
+  threads: 10
+HADashboard: {}
+HASS:
+  ha_key: [HASS_PASSWORD]
+  ha_url: [HASS_IP]
+
+# ------------------------------------------------------
+# Apps
+# ------------------------------------------------------
+
+PublishStatesInMaster:
+  class: SlavePublisher
+  module: publish_states_in_master
+
+  master_ha_key: [MASTER_HASS_PASSWORD]
+  master_ha_url: [MASTER_HASS_IP]
+  slave_sufix: _rpi2mpd

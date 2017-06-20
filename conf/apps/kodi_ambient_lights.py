@@ -109,7 +109,6 @@ class KodiAssistant(appapi.AppDaemon):
         method = payload_event['input']['method']
         if event_id == EVENT_KODI_CALL_METHOD_RESULT \
                 and method == METHOD_GET_ITEM:
-            self.log('DEBUG RECEIVE KODI IN AMBIENT LIGHTS: {}'.format(result))
             if 'item' in result:
                 item = result['item']
                 new_video = (self._item_playing is None

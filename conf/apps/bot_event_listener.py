@@ -8,15 +8,17 @@ or from iOS notification actions.
 Harcoded custom logic for controlling HA with feedback from these actions.
 
 """
-import appdaemon.appapi as appapi
-import appdaemon.conf as conf
 import datetime as dt
 import json
-import paramiko
 import subprocess
 from random import randrange
 import re
 from time import time
+
+import appdaemon.appapi as appapi
+import appdaemon.conf as conf
+from fuzzywuzzy.process import extractOne
+import paramiko
 
 
 LOG_LEVEL = 'DEBUG'
@@ -127,7 +129,8 @@ TELEGRAM_SHELL_CMDS = ['/shell', '/osmc', '/osmcmail', '/rpi2', '/rpi2h',
                        '/cathass', '/catappd', '/catappderr', '/tvshowscron',
                        '/tvshowsinfo', '/tvshowsdd', '/tvshowsnext']
 TELEGRAM_HASS_CMDS = ['/getcams', '/status', '/hastatus', '/html', '/template',
-                      '/service_call', '/help', '/start',
+                      '/service_call', '/help', '/start', '/test',
+                      '/timer_off', '/timer_on', '/cancel_timer',
                       '/enerpi', '/enerpifact', '/enerpitiles',
                       '/enerpikwh', '/enerpipower', '/init', '/hasswiz']
 TELEGRAM_IOS_COMMANDS = {  # AWAY category
@@ -348,6 +351,7 @@ CMD_MAKE_HASS_PIC = '/home/homeassistant/.homeassistant/shell/capture_pic.sh ' \
                     'snapshot_cameras/{cam_filename} {img_url} {hass_pw}'
 PIC_STATIC_URL = '{}/local/snapshot_cameras/{}'
 
+
 def _clean(telegram_text):
     """Remove markdown characters to prevent
     Telegram parser to fail ('_' & '*' chars)."""
@@ -379,6 +383,10 @@ class EventListener(appapi.AppDaemon):
 
     # HASS entities:
     _hass_entities = None
+    _hass_entities_plain = None
+
+    # Scheduled tasks
+    _scheduled = {}
 
     def initialize(self):
         """AppDaemon required method for app init."""
@@ -425,14 +433,57 @@ class EventListener(appapi.AppDaemon):
         # Entities & friendly names:
         self._hass_entities = {
             ent_type: {k.split('.')[1]: v['attributes']['friendly_name']
-                       for k, v in self.get_state(ent_type).items()}
+                       for k, v in self.get_state(ent_type).items()
+                       if 'friendly_name' in v['attributes']}
             for ent_type in HASSWIZ_TYPES}
+        self._hass_entities_plain = {'{}.{}'.format(domain, ent): fn
+                                     for domain, entities in
+                                     self._hass_entities.items()
+                                     for ent, fn in entities.items()}
 
         # Start showing menu:
         self._notify_bot_menu(self._bot_chatids[0])
 
-        # TODO Remove in the future (homeassistant.start trigger is not working)
-        self.fire_event('ha_start')
+    def fuzzy_get_entity_and_fn(self, entity_id_name):
+        """Fuzzy get of HA entities"""
+        friendly_name = entity_id = None
+        if '.' in entity_id_name:
+            if self.entity_exists(entity_id_name):
+                friendly_name = self.friendly_name(entity_id_name)
+                entity_id = entity_id_name
+            else:
+                # Fuzzy lookup
+                choices = self._hass_entities_plain.keys()
+                found = extractOne(entity_id_name, choices, score_cutoff=70)
+                if found is not None:
+                    entity_id = found[0]
+                    friendly_name = self.friendly_name(entity_id)
+                else:
+                    self.log('Entity not recognized: "{}" -> {}'
+                             .format(entity_id_name, choices))
+        else:
+            # Fuzzy lookup in friendly names
+            choices = self._hass_entities_plain.values()
+            found = extractOne(entity_id_name, choices, score_cutoff=70)
+            if found is not None:
+                friendly_name = found[0]
+                entity_id = list(sorted(filter(
+                    lambda x: self._hass_entities_plain[x] == friendly_name,
+                    self._hass_entities_plain), reverse=True))
+                self.log('fuzzy: {} --> {}'.format(found, entity_id), 'DEBUG')
+                entity_id = entity_id[0]
+            else:
+                # Fuzzy lookup in entity names
+                choices = [x.split('.') for x in self._hass_entities_plain]
+                simple_names = list(zip(*choices))[1]
+                simple_found = extractOne(entity_id_name, simple_names)[0]
+                entity_id = '{}.{}'.format(
+                    list(zip(*choices))[0][simple_names.index(simple_found)],
+                    simple_found)
+                friendly_name = self.friendly_name(entity_id)
+        self.log('Entity fuzzy recog: "{}" -> `{}`, "{}"'
+                     .format(entity_id_name, entity_id, friendly_name))
+        return entity_id, friendly_name
 
     def _notify_bot_menu(self, user_id):
         self.call_service(self._bot_notifier + '/send_message',
@@ -586,8 +637,35 @@ class EventListener(appapi.AppDaemon):
         else:  # shell cmd
             return self._shell_command_output(' '.join(args), timeout=timeout, **kwargs)
 
+    def _run_scheduled(self, kwargs):
+        mode = kwargs['mode']
+        context = kwargs['context']
+        entity_id = kwargs['entity_id']
+        fn = kwargs['fn']
+        self.call_service('homeassistant/turn_' + mode, entity_id=entity_id)
+        self._scheduled.pop((mode, entity_id))
+        action = 'Encendido' if mode == 'on' else 'Apagado'
+        run_delay = context['run_delay']
+        self.log('Scheduled RUN: TimerOut turn_{} {} after {}s'
+                 .format(mode, entity_id, run_delay))
+        cmd = '/service_call homeassistant/turn_'
+        keyboard = ['Encender {}:{}on {}'.format(fn, cmd, entity_id),
+                    'Apagar {}:{}off {}'.format(fn, cmd, entity_id)]
+        msg = dict(title='*Ejecución temporizada*',
+                   message='{} de {} después de {} sec'.format(
+                       action, self.friendly_name(entity_id), run_delay),
+                   target=context['target'],
+                   disable_notification=False,
+                   inline_keyboard=keyboard)
+        self.call_service(self._bot_notifier + '/send_message', **msg)
+
+    def _cancel_scheduled(self, mode, entity_id):
+        handler = self._scheduled.pop((mode, entity_id))
+        self.cancel_timer(handler)
+        self.log('Cancelled Timer {}. Scheduled calls: {}'
+                 .format(handler, self._scheduled))
+
     def _bot_hass_cmd(self, command, cmd_args, user_id):
-        # TODO + comandos, fuzzy logic con cmd + args, etc...
         serv = self._bot_notifier + '/send_message'
         prefix = 'WTF CMD {}'.format(command)
         msg = {'message': "ERROR {} - {}".format(command, cmd_args),
@@ -612,7 +690,7 @@ class EventListener(appapi.AppDaemon):
                        inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
                        disable_notification=False)
         elif command == '/service_call':
-            # /service_call switch.turn_off switch.kodi_tv_salon
+            # /service_call switch/turn_off switch.kodi_tv_salon
             prefix = 'HASS SERVICE CALL'
             msg = dict(target=user_id,
                        message="*Bad service call*: %s" % cmd_args,
@@ -630,9 +708,91 @@ class EventListener(appapi.AppDaemon):
                     if cmd_args[2][0] == '{':
                         msg = json.loads(' '.join(cmd_args[2:]))
                     else:
-                        self.error('Service call bad args (no JSON): %s',
-                                   cmd_args)
+                        self.error('Service call bad args (no JSON): {}'
+                                   .format(cmd_args))
             self.log('Generic Service call: {}({})'.format(serv, msg))
+        elif command == '/timer_off' or command == '/timer_on':
+            # /timer_off 9:30 switch.kodi_tv_salon
+            # /timer_on 1h switch.kodi_tv_salon
+            now = dt.datetime.now()
+            msg = dict(target=user_id,
+                       message="*Bad scheduled service call*: %s" % cmd_args,
+                       inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
+                       disable_notification=False)
+            mode = command.lstrip('/timer_')
+            prefix = 'HASS TIMER ' + mode.upper()
+            if cmd_args:
+                runtime = cmd_args[0]
+                entity, fn = self.fuzzy_get_entity_and_fn(
+                    ' '.join(cmd_args[1:]))
+                if ':' in runtime:
+                    future = dt.datetime(
+                        now.date(),
+                        dt.time(*[int(x) for x in runtime.split(':')]))
+                    run_delay = (future - now).total_seconds()
+                    if run_delay < 0:
+                        run_delay += 3600 * 24
+                elif 'h' in runtime:
+                    run_delay = 3600 * int(runtime[:runtime.index('h')])
+                elif 'm' in runtime:
+                    run_delay = 60 * int(runtime[:runtime.index('m')])
+                elif 's' in runtime:
+                    run_delay = int(runtime[:runtime.index('s')])
+                else:
+                    run_delay = int(runtime)
+
+                if (mode, entity) in self._scheduled:
+                    self._cancel_scheduled(mode, entity)
+                handler = self.run_in(self._run_scheduled, run_delay,
+                                      mode=mode, entity_id=entity, fn=fn,
+                                      context={"target": user_id,
+                                               "run_delay": run_delay})
+                self._scheduled[(mode, entity)] = handler
+                str_time = (now + dt.timedelta(seconds=run_delay)
+                            ).replace(microsecond=0).time().isoformat()
+                cbtn = 'Cancelar temporizador ({}):/cancel_timer {}'
+                msg['inline_keyboard'] = [cbtn.format(str_time, handler)]
+                msg['title'] = 'Temporizador *{}* {}'.format(
+                    mode, self.friendly_name(entity))
+                msg['message'] = "*Timer {}*: {} -> delay: {} sec".format(
+                    mode.upper(), cmd_args, run_delay)
+                self.log('Timer {} entity {} in {}s ({}) -> {}'
+                         .format(mode, entity, run_delay, runtime, handler))
+            else:
+                self.log('Timer {} bad call: {}'
+                         .format(mode.upper(), cmd_args))
+        elif command == '/cancel_timer':
+            # /cancel_timer handler_id
+            prefix = 'HASS CANCEL TIMER'
+            msg = dict(target=user_id,
+                       message="*Bad cancel_timer call*: %s" % cmd_args,
+                       disable_notification=True)
+            if cmd_args:
+                if len(cmd_args) > 1:
+                    mode = cmd_args[0].lower()
+                    entity_id, fn = self.fuzzy_get_entity_and_fn(
+                        ' '.join(cmd_args[1:]))
+                    if (mode, entity_id) in self._scheduled:
+                        self._cancel_scheduled(mode, entity_id)
+                        msg['message'] = "Timer {} for {} cancelled".format(
+                            mode, entity_id)
+                    else:
+                        self.log("Can't cancel timer {} {}: {}"
+                                 .format(mode, entity_id, self._scheduled))
+                else:
+                    handler = cmd_args[0]
+                    keys = list(filter(
+                        lambda x: str(self._scheduled[x]) == handler,
+                        self._scheduled))
+                    if keys:
+                        self._cancel_scheduled(*keys[0])
+                        msg['message'] = "Timer {} for {} cancelled".format(
+                            *keys[0])
+                    else:
+                        self.log("Can't cancel timer with handler_id {}, {}"
+                                 .format(handler, self._scheduled))
+            else:
+                self.log('Cancel Timer bad call (no args!)')
         elif command == '/status':
             # multiple messaging:
             msg = dict(title=CMD_STATUS_TITLE, message=CMD_STATUS_TEMPL_SALON,
@@ -671,6 +831,15 @@ class EventListener(appapi.AppDaemon):
             msg = dict(message=' '.join(cmd_args), target=user_id,
                        keyboard=TELEGRAM_KEYBOARD)
             prefix = 'TEMPLATE RENDER'
+        elif command == '/test':
+            args = ' '.join(cmd_args)
+            self.log('TEST FUZZY ENTITY: "{}"'.format(args))
+            entity, fn = self.fuzzy_get_entity_and_fn(args)
+            message = 'TEST FUZZY "{}" -> {}, {}'.format(args, entity, fn)
+            self.log(message)
+            msg = dict(message=_clean(message), target=user_id,
+                       disable_notification=True)
+            prefix = 'TEST METHOD'
         elif command == '/getcams':
             serv = self._bot_notifier + '/send_photo'
             msg = {"target": user_id,
@@ -867,6 +1036,7 @@ class EventListener(appapi.AppDaemon):
 
     def process_telegram_command(self, command, cmd_args,
                                  user_id, callback_id=None):
+        """Handle telegram_command's received."""
         tic = time()
         if callback_id is not None:
             msg = dict(callback_query_id=callback_id, show_alert=False)
@@ -919,9 +1089,10 @@ class EventListener(appapi.AppDaemon):
 
     def process_telegram_wizard(self, msg_origin, data_callback,
                                 user_id, callback_id):
+        """Run wizard steps."""
         # Wizard evolution:
         option = data_callback[len(COMMAND_WIZARD_OPTION):]
-        data_msg = dict(callback_query_id=callback_id, show_alert = False)
+        data_msg = dict(callback_query_id=callback_id, show_alert=False)
         answer_callback_serv = self._bot_notifier + '/answer_callback_query'
         if option == 'reset':
             self._bot_wizstack[user_id] = []
@@ -1082,6 +1253,8 @@ class EventListener(appapi.AppDaemon):
         self.turn_off("switch.cocina")
         self.turn_off("switch.altavoz")
         self.turn_off("switch.kodi_tv_salon")
+        self.turn_off("switch.estudio_light_relay")
+        self.turn_off("switch.new_switch_2")
         if turn_off_heater:
             self.turn_off("switch.caldera")
 

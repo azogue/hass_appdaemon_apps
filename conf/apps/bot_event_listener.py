@@ -78,10 +78,14 @@ TELEGRAM_BOT_HELP = '''*Comandos disponibles*:
 /start - Muestra el mensaje de bienvenida y un teclado con comandos de ejemplo.
 /init - Ejecuta la misma acción que /start.
 /hasswiz - Inicia el asistente para interactuar con Home Assistant.
+/timeron - Establece inicio temporizado (+ ∆T + entity)
+/timeroff - Establece parada temporizada (+ ∆T + entity)
+/canceltimer - Cancela un temporizador
 /status - Devuelve información actual de los sensores de la casa.
 /hastatus - Devuelve información sobre el funcionamiento de Home Assistant.
 /getcams - Devuelve instantáneas de las cámaras de la casa.
 /template - Render del texto pasado como argumentos.
+/test - Fuzzy recog de entidades por id o friendly name
 /html - Render del texto pasado usando el parser HTML.
 /enerpi - Muestra información general sobre el consumo eléctrico actual.
 /enerpifact - IMPLEMENTAR
@@ -130,7 +134,7 @@ TELEGRAM_SHELL_CMDS = ['/shell', '/osmc', '/osmcmail', '/rpi2', '/rpi2h',
                        '/tvshowsinfo', '/tvshowsdd', '/tvshowsnext']
 TELEGRAM_HASS_CMDS = ['/getcams', '/status', '/hastatus', '/html', '/template',
                       '/service_call', '/help', '/start', '/test',
-                      '/timer_off', '/timer_on', '/cancel_timer',
+                      '/timeroff', '/timeron', '/canceltimer',
                       '/enerpi', '/enerpifact', '/enerpitiles',
                       '/enerpikwh', '/enerpipower', '/init', '/hasswiz']
 TELEGRAM_IOS_COMMANDS = {  # AWAY category
@@ -711,14 +715,14 @@ class EventListener(appapi.AppDaemon):
                         self.error('Service call bad args (no JSON): {}'
                                    .format(cmd_args))
             self.log('Generic Service call: {}({})'.format(serv, msg))
-        elif command == '/timer_off' or command == '/timer_on':
-            # /timer_off 9:30 switch.kodi_tv_salon
-            # /timer_on 1h switch.kodi_tv_salon
+        elif command == '/timeroff' or command == '/timeron':
+            # /timeroff 9:30 switch.kodi_tv_salon
+            # /timeron 1h switch.kodi_tv_salon
             now = dt.datetime.now()
             msg = dict(target=user_id,
                        message="*Bad scheduled service call*: %s" % cmd_args,
                        inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
-                       disable_notification=False)
+                       disable_notification=True)
             mode = command.lstrip('/timer_')
             prefix = 'HASS TIMER ' + mode.upper()
             if cmd_args:
@@ -761,7 +765,7 @@ class EventListener(appapi.AppDaemon):
             else:
                 self.log('Timer {} bad call: {}'
                          .format(mode.upper(), cmd_args))
-        elif command == '/cancel_timer':
+        elif command == '/canceltimer':
             # /cancel_timer handler_id
             prefix = 'HASS CANCEL TIMER'
             msg = dict(target=user_id,
@@ -1071,10 +1075,9 @@ class EventListener(appapi.AppDaemon):
             self.call_service(self._bot_notifier + '/send_message',
                               title=title, target=user_id, message=message)
         elif command in TELEGRAM_HASS_CMDS:
-            msg["message"] = '_Running_: {}'.format(command)
             if callback_id is not None:
-                msg['message'] = msg['message'].replace('_', '')
-            self.call_service(service, **msg)
+                msg["message"] = 'Running: {}'.format(_clean(command))
+                self.call_service(service, **msg)
             serv, prefix, msg = self._bot_hass_cmd(command, cmd_args, user_id)
             self.log('{} TOOK {:.3f}s'.format(prefix, time() - tic))
             self.call_service(serv, **msg)

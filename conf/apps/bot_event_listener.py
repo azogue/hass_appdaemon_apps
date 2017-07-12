@@ -147,7 +147,7 @@ TELEGRAM_IOS_COMMANDS = {  # AWAY category
                          '/ignorar': 'IGNORE_HOME',  # Reset alarm state
                          # ALARM category
                          '/silenciar': 'ALARM_SILENT',  # Silenciar sirena
-                         '/resetalarm': 'ALARM_RESET',  # Ignorar armado y reset
+                         '/resetalarm': 'ALARM_RESET',  # Ignorar armado, reset
                          '/desconectar': 'ALARM_CANCEL',  # Desconectar alarma
                          # CONFIRM category
                          '/confirmar': 'CONFIRM_OK',  # Validar
@@ -230,6 +230,11 @@ HASSWIZ_STEPS = [
     },
 ]
 
+INIT_MESSAGE = {
+    "message": '_Say something to me_, *my master*',
+    "inline_keyboard": TELEGRAM_INLINE_KEYBOARD,
+    "disable_notification": True
+}
 ##################################################
 # Remote SSH shell control
 ##################################################
@@ -262,7 +267,6 @@ CMD_STATUS_TEMPL_SALON = '''*Salón*:
 - Mov: {{states.binary_sensor.pir_salon.state}} ({{relative_time(states.binary_sensor.pir_salon.last_changed)}})
 - VMov: {{states.binary_sensor.motioncam_salon.state}} ({{relative_time(states.binary_sensor.motioncam_salon.last_changed)}})
 {{states.switch.camara.attributes.friendly_name}}: {{states.switch.camara.state}} ({{relative_time(states.switch.camara.last_changed)}})
-{{states.switch.kodi_tv_salon.attributes.friendly_name}}: {{states.switch.kodi_tv_salon.state}} ({{relative_time(states.switch.kodi_tv_salon.last_changed)}})
 Ambilight: {{states.switch.toggle_kodi_ambilight.state}} ({{relative_time(states.switch.toggle_kodi_ambilight.last_changed)}})
 KODI: {{states.media_player.kodi.state}} ({{relative_time(states.media_player.kodi.last_changed)}})
 
@@ -351,8 +355,8 @@ Funcionando desde {{states.sensor.last_boot.state}} (HASS {{relative_time(states
 - {{states.sensor.core_error_counter.state}} core errors.'''
 
 # Custom shell script for capture a pic from a HASS camera:
-CMD_MAKE_HASS_PIC = '/home/homeassistant/.homeassistant/shell/capture_pic.sh ' \
-                    'snapshot_cameras/{cam_filename} {img_url} {hass_pw}'
+CMD_MAKE_HASS_PIC = '/home/homeassistant/.homeassistant/shell/capture_pic.sh' \
+                    ' snapshot_cameras/{cam_filename} {img_url} {hass_pw}'
 PIC_STATIC_URL = '{}/local/snapshot_cameras/{}'
 
 
@@ -364,10 +368,11 @@ def _clean(telegram_text):
 
 # noinspection PyClassHasNoInit
 class EventListener(appapi.AppDaemon):
-    """Event listener for ios.notification_action_fired,
-    Telegram bot events and the family tracker."""
+    """Event listener for ios actions and Telegram bot events."""
 
     _config = None
+    _ha_key = None
+
     _lights_notif = None
     _lights_notif_state = None
     _lights_notif_st_attr = None
@@ -378,9 +383,6 @@ class EventListener(appapi.AppDaemon):
     _bot_wizstack = None
     _bot_chatids = None
     _bot_users = None
-
-    # Family Tracker
-    _tracking_state = None
 
     # Alarm state
     _alarm_state = False
@@ -395,6 +397,7 @@ class EventListener(appapi.AppDaemon):
     def initialize(self):
         """AppDaemon required method for app init."""
         self._config = dict(self.config['AppDaemon'])
+        self._ha_key = dict(self.config['HASS'])['ha_key']
         self._bot_name = '@' + self._config.get('bot_name')
         self._notifier = self._config.get('notifier').replace('.', '/')
         _chatids = [int(x) for x in self._config.get('bot_chatids').split(',')]
@@ -418,21 +421,8 @@ class EventListener(appapi.AppDaemon):
                           entity='input_select.alarm_mode')
         self.listen_state(self.alarm_mode_controller_master_switch,
                           entity='switch.switch_master_alarm')
-        self._alarm_state = self.get_state('switch.switch_master_alarm') == 'on'
-
-        # Device Tracking:
-        _devs_track = self.get_state('group.family', attribute='attributes'
-                                     )['entity_id']
-        self._tracking_state = {
-            dev: [self.get_state(dev),
-                  self.get_state(dev, attribute='last_changed')]
-            for dev in _devs_track}
-        [self.listen_state(self.track_zone_ch, dev, old="home", duration=120)
-         for dev in self._tracking_state.keys()]
-        [self.listen_state(self.track_zone_ch, dev, new="home", duration=5)
-         for dev in self._tracking_state.keys()]
-        self.log("**TRACKING STATE: {} -> {}"
-                 .format(_devs_track, self._tracking_state))
+        self._alarm_state = self.get_state(
+            'switch.switch_master_alarm') == 'on'
 
         # Entities & friendly names:
         self._hass_entities = {
@@ -444,9 +434,6 @@ class EventListener(appapi.AppDaemon):
                                      for domain, entities in
                                      self._hass_entities.items()
                                      for ent, fn in entities.items()}
-
-        # Start showing menu:
-        self._notify_bot_menu(self._bot_chatids[0])
 
     def fuzzy_get_entity_and_fn(self, entity_id_name):
         """Fuzzy get of HA entities"""
@@ -486,16 +473,8 @@ class EventListener(appapi.AppDaemon):
                     simple_found)
                 friendly_name = self.friendly_name(entity_id)
         self.log('Entity fuzzy recog: "{}" -> `{}`, "{}"'
-                     .format(entity_id_name, entity_id, friendly_name))
+                 .format(entity_id_name, entity_id, friendly_name))
         return entity_id, friendly_name
-
-    def _notify_bot_menu(self, user_id):
-        self.call_service(self._bot_notifier + '/send_message',
-                          target=user_id,
-                          message='_Say something to me_, *my master*',
-                          inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
-                          disable_notification=True)
-        return True
 
     def _ssh_command_output(self, user, host, command, timeout=10):
         """Exec a ssh command in a remote host.
@@ -542,7 +521,7 @@ class EventListener(appapi.AppDaemon):
         img_url = '{}/api/camera_proxy/camera.{}'.format(
             self._config['base_url'], cam_entity_id)
         cmd = CMD_MAKE_HASS_PIC.format(
-            hass_pw=self._config['ha_key'],
+            hass_pw=self._ha_key,
             img_url=img_url, cam_filename=file)
         ok, _, _ = self._shell_command_output(cmd, timeout=5)
         if not ok:
@@ -689,12 +668,9 @@ class EventListener(appapi.AppDaemon):
         elif (command == '/init') or (command == '/start'):
             # Welcome message & keyboards:
             prefix = 'BOT START'
-            msg = dict(target=user_id,
-                       message='_Say something to me_, *my master*',
-                       inline_keyboard=TELEGRAM_INLINE_KEYBOARD,
-                       disable_notification=False)
+            msg = dict(target=user_id, **INIT_MESSAGE)
         elif command == '/service_call':
-            # /service_call switch/turn_off switch.kodi_tv_salon
+            # /service_call media_player/turn_off media_player.kodi
             prefix = 'HASS SERVICE CALL'
             msg = dict(target=user_id,
                        message="*Bad service call*: %s" % cmd_args,
@@ -716,8 +692,8 @@ class EventListener(appapi.AppDaemon):
                                    .format(cmd_args))
             self.log('Generic Service call: {}({})'.format(serv, msg))
         elif command == '/timeroff' or command == '/timeron':
-            # /timeroff 9:30 switch.kodi_tv_salon
-            # /timeron 1h switch.kodi_tv_salon
+            # /timeroff 9:30 media_player.kodi
+            # /timeron 1h media_player.kodi
             now = dt.datetime.now()
             msg = dict(target=user_id,
                        message="*Bad scheduled service call*: %s" % cmd_args,
@@ -935,44 +911,6 @@ class EventListener(appapi.AppDaemon):
                 self.select_option("input_select.alarm_mode",
                                    option="Desconectada")
 
-    def _alguien_mas_en_casa(self, entity_exclude='no_excluir_nada'):
-        res = any([x[0] == 'home' for k, x in self._tracking_state.items()
-                   if k != entity_exclude])
-        if self._alarm_state:
-            self.log('alguien_mas_en_casa? -> {}. De {}, excl={}'
-                     .format(res, self._tracking_state, entity_exclude))
-        return res
-
-    # noinspection PyUnusedLocal
-    def track_zone_ch(self, entity, attribute, old, new, kwargs):
-        last_st, last_ch = self._tracking_state[entity]
-        self._tracking_state[entity] = [new, self.datetime()]
-        clean_ent = entity.lstrip('device_tracker.')
-        if last_st != old:
-            self.log('TRACKING_STATE_CHANGE "{}" from "{}" [!="{}"'
-                     ', changed at {}] to "{}"'
-                     .format(clean_ent, old, last_st, last_ch, new))
-        else:
-            self.log('TRACKING_STATE_CHANGE "{}" from "{}" [{}] to "{}"'
-                     .format(clean_ent, old, last_ch, new))
-            if (new == 'home') and not self._alguien_mas_en_casa():
-                # Llegada a casa:
-                # if self._alarm_state:
-                data_msg = {"title": "Bienvenido a casa",
-                            "message": "¿Qué puedo hacer por ti?",
-                            "data": {"push": {"badge": 0,
-                                              "category": "INHOME"}}}
-                self.log('INHOME NOTIF: {}'.format(data_msg))
-                self.call_service(self._notifier, **data_msg)
-            elif ((old == 'home') and not self._alguien_mas_en_casa()
-                  and not self._alarm_state):
-                # Salida de casa:
-                data_msg = {"title": "Vuelve pronto!",
-                            "message": "¿Apagamos luces o encendemos alarma?",
-                            "data": {"push": {"badge": 0, "category": "AWAY"}}}
-                self.log('AWAY NOTIF: {}'.format(data_msg))
-                self.call_service(self._notifier, **data_msg)
-
     def light_flash(self, xy_color, persistence=5, n_flashes=3):
         """Flash hue lights as visual notification."""
 
@@ -1113,7 +1051,9 @@ class EventListener(appapi.AppDaemon):
             self.log('HASSWIZ EXIT')
             self.call_service(answer_callback_serv,
                               message="Bye bye...", **data_msg)
-            return self._notify_bot_menu(user_id)
+            self.call_service(self._bot_notifier + '/send_message',
+                              target=user_id, **INIT_MESSAGE)
+            return
         else:
             self._bot_wizstack[user_id].append(option)
             if len(self._bot_wizstack[user_id]) == len(HASSWIZ_STEPS):
@@ -1122,7 +1062,8 @@ class EventListener(appapi.AppDaemon):
                 self._bot_wizstack[user_id].pop()
                 entity = '{}.{}'.format(service, entity_id)
                 # CALLING SERVICE / GET STATES
-                if (service in ['switch', 'light', 'input_boolean']) and (operation in ['turn_on', 'turn_off']):
+                if (service in ['switch', 'light', 'input_boolean']) \
+                        and (operation in ['turn_on', 'turn_off']):
                     message = "Service called: {}/{}/{}"
                     message = message.format(service, operation, entity_id)
                     self.log('HASSWIZ: CALLING SERVICE "{}". Stack: {}'
@@ -1138,7 +1079,8 @@ class EventListener(appapi.AppDaemon):
                         data = self.get_state(entity, attribute='attributes')
                     self.log('HASSWIZ STATE DATA -> {}/{}/{} -> {}'
                              .format(service, operation, entity_id, data))
-                    message = "{} {}: -> {}".format(entity_id, operation, str(data))
+                    message = "{} {}: -> {}".format(
+                        entity_id, operation, str(data))
                     self.call_service(answer_callback_serv,
                                       message=message, **data_msg)
                 else:
@@ -1149,8 +1091,8 @@ class EventListener(appapi.AppDaemon):
                              .format(comb_err), 'warning')
                     self.call_service(answer_callback_serv,
                                       message=message, **data_msg)
-                    return False
-                return True
+                    return
+                return
             else:
                 # Notificación de respuesta:
                 message = "Option selected: {}".format(option)
@@ -1193,7 +1135,6 @@ class EventListener(appapi.AppDaemon):
                           chat_id=user_id,
                           message_id=msg_origin['message_id'],
                           inline_keyboard=wiz_step_inline_kb)
-        return True
 
     # noinspection PyUnusedLocal
     def receive_telegram_event(self, event_id, payload_event, *args):
@@ -1232,8 +1173,8 @@ class EventListener(appapi.AppDaemon):
                 self.process_telegram_command(command, cmd_args, user_id,
                                               callback_id=callback_id)
             elif data_callback.startswith(COMMAND_WIZARD_OPTION):  # Wizard
-                return self.process_telegram_wizard(msg_origin, data_callback,
-                                                    user_id, callback_id)
+                self.process_telegram_wizard(msg_origin, data_callback,
+                                             user_id, callback_id)
             else:  # WTF?
                 rand_msg_mask = TELEGRAM_UNKNOWN[
                     randrange(len(TELEGRAM_UNKNOWN))]
@@ -1244,7 +1185,8 @@ class EventListener(appapi.AppDaemon):
                                   keyboard=TELEGRAM_KEYBOARD,
                                   message=rand_msg_mask.format(data_callback))
 
-    def frontend_notif(self, action_name, msg_origin, mask=DEFAULT_NOTIF_MASK, title=None):
+    def frontend_notif(self, action_name, msg_origin,
+                       mask=DEFAULT_NOTIF_MASK, title=None):
         """Set a persistent_notification in frontend."""
         message = mask.format(dt.datetime.now(tz=conf.tz), msg_origin)
         title = action_name if title is None else title
@@ -1255,7 +1197,7 @@ class EventListener(appapi.AppDaemon):
         self.turn_off("switch.calefactor")
         self.turn_off("switch.cocina")
         self.turn_off("switch.altavoz")
-        self.turn_off("switch.kodi_tv_salon")
+        self.turn_off("media_player.kodi")
         self.turn_off("switch.estudio_light_relay")
         self.turn_off("switch.new_switch_2")
         if turn_off_heater:
@@ -1289,7 +1231,8 @@ class EventListener(appapi.AppDaemon):
 
         # INHOME category
         elif action == 'WELCOME_HOME':  # Alarm OFF, lights ON
-            self.select_option("input_select.alarm_mode", option="Desconectada")
+            self.select_option("input_select.alarm_mode",
+                               option="Desconectada")
             self.turn_on("switch.cocina")
             self.call_service('light/hue_activate_scene',
                               group_name="Salón", scene_name='Semáforo')
@@ -1298,8 +1241,9 @@ class EventListener(appapi.AppDaemon):
             action_msg_log += 'ALARM OFF. Kitchen ON, "Semáforo"("Salón")'
             self.light_flash(XY_COLORS['green'], persistence=2, n_flashes=2)
         elif action == 'WELCOME_HOME_TV':  # Alarm OFF, lights ON
-            self.select_option("input_select.alarm_mode", option="Desconectada")
-            self.turn_on("switch.kodi_tv_salon")
+            self.select_option("input_select.alarm_mode",
+                               option="Desconectada")
+            self.turn_on("script.play_kodi_pvr")
             self.call_service('light/hue_activate_scene',
                               group_name="Salón", scene_name='Aurora boreal')
             self.frontend_notif(action, origin, mask=NOTIF_MASK_ALARM_OFF,
@@ -1329,7 +1273,8 @@ class EventListener(appapi.AppDaemon):
             self.frontend_notif(action, origin,
                                 mask=NOTIF_MASK_ALARM_OFF,
                                 title="Desconexión de Alarma")
-            self.select_option("input_select.alarm_mode", option="Desconectada")
+            self.select_option("input_select.alarm_mode",
+                               option="Desconectada")
             action_msg_log += 'ALARM MODE OFF'
             self.light_flash(XY_COLORS['green'], persistence=2, n_flashes=5)
 
@@ -1358,7 +1303,8 @@ class EventListener(appapi.AppDaemon):
             self.call_service('input_slider/select_value',
                               entity_id="input_slider.light_main_slider_salon",
                               value=254)
-            self.call_service('light/turn_on', entity_id="light.salon", brightness=255)
+            self.call_service('light/turn_on',
+                              entity_id="light.salon", brightness=255)
             action_msg_log += 'LIGHTS ON: LIGHT MAIN SLIDER SALON 254'
         elif action == 'HYPERION_TOGGLE':  # Toggle Ambilight
             self.frontend_notif(action, origin,
@@ -1396,7 +1342,7 @@ class EventListener(appapi.AppDaemon):
             self.turn_off('input_boolean.manual_trigger_lacafetera')
             action_msg_log += 'Apagado de alarma'
 
-        # TODO replace/remove EXECORDER iOS category with textInput not working!
+        # TODO remove EXECORDER iOS category with textInput not working!
         elif action == 'INPUTORDER':  # Tell me ('textInput')
             self.frontend_notif(action, origin)
             action_msg_log += 'INPUT: {}'.format(origin)

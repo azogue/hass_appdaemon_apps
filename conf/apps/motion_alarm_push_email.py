@@ -56,6 +56,9 @@ import requests
 from time import time, sleep
 import yaml
 
+from common import set_global, get_global, GLOBAL_ALARM_STATE
+
+# TODO Use get_global to query the family tracker (or even trigger a custom house_change_event from there?)
 
 # LOG_LEVEL = 'DEBUG'
 LOG_LEVEL = 'INFO'
@@ -262,8 +265,9 @@ class MotionAlarm(appapi.AppDaemon):
         self._max_time_sirena_on = self.args.get('max_time_alarm_on', None)
         if self._max_time_sirena_on is not None:
             self._max_time_sirena_on = int(self._max_time_sirena_on)
-        self.log('Insistencia de notificación de alarma: {}; Persistencia de sirena: {}'
-                 .format(self._retry_push_alarm, self._max_time_sirena_on))
+        # self.log('Insistencia de notificación de alarma: {};'
+        #          ' Persistencia de sirena: {}'
+        #          .format(self._retry_push_alarm, self._max_time_sirena_on))
 
         # RAW SENSORS:
         if self._raw_sensors is not None:
@@ -290,6 +294,8 @@ class MotionAlarm(appapi.AppDaemon):
 
         # Main switches:
         self._alarm_on = self._listen_to_switch('main_switch', self._main_switch, self._main_switch_ch)
+
+        set_global(self, GLOBAL_ALARM_STATE, self._alarm_on)
         self._use_push_notifier = self._listen_to_switch('push_n', self._use_push_notifier_switch, self._main_switch_ch)
         self._silent_mode = self._listen_to_switch('silent_mode', self._silent_mode_switch, self._main_switch_ch)
 
@@ -374,16 +380,19 @@ class MotionAlarm(appapi.AppDaemon):
 
     def _listen_to_switch(self, identif, entity_switch, func_listen_change):
         if type(entity_switch) is bool:
-            self.log('FIXED BOOL: {} -> {}'.format(identif, entity_switch), LOG_LEVEL)
+            # self.log('FIXED BOOL: {} -> {}'
+            #          .format(identif, entity_switch), LOG_LEVEL)
             return entity_switch
         if entity_switch.lower() in ['true', 'false', 'on', 'off', '1', '0']:
             fixed_bool = entity_switch.lower() in ['true', 'on', '1']
-            self.log('FIXED SWITCH: {} -> "{}": {}'.format(identif, entity_switch, fixed_bool), LOG_LEVEL)
+            # self.log('FIXED SWITCH: {} -> "{}": {}'
+            #          .format(identif, entity_switch, fixed_bool), LOG_LEVEL)
             return fixed_bool
         else:
             state = self.get_state(entity_switch) == 'on'
             self.listen_state(func_listen_change, entity_switch)
-            self.log('LISTEN TO CHANGES IN SWITCH: {} -> {}, ST={}'.format(identif, entity_switch, state), LOG_LEVEL)
+            # self.log('LISTEN TO CHANGES IN SWITCH: {} -> {}, ST={}'
+            #          .format(identif, entity_switch, state), LOG_LEVEL)
             return state
 
     def _is_too_old(self, ts, delta_secs):
@@ -574,6 +583,7 @@ class MotionAlarm(appapi.AppDaemon):
         with self._lock:
             self._handler_armado_alarma = None
             self._alarm_on = True
+            set_global(self, GLOBAL_ALARM_STATE, True)
         self._reset_session_data()
         self.append_event_data(dict(event_type=EVENT_ACTIVACION))
         self.text_notification()
@@ -592,6 +602,7 @@ class MotionAlarm(appapi.AppDaemon):
 
                 with self._lock:
                     self._alarm_on = False
+                    set_global(self, GLOBAL_ALARM_STATE, False)
                     self._alarm_state = False
 
                 # Operación con relés en apagado de alarma:

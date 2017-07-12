@@ -36,6 +36,45 @@ AutoFeedback:
   module: bot_event_listener
   lights_notif: light.cuenco
 
+FamilyTracker:
+  class: FamilyTracker
+  module: family_tracker
+  home_group: group.family
+  people:  # Content of home_group: chat_id and optional extra_tracker
+    group.eugenio:
+      chat_id_idx: 0
+      extra_tracker: input_boolean.eu_presence
+    group.mary:
+      chat_id_idx: 1
+      extra_tracker: input_boolean.carmen_presence
+
+TemperatureVigil:
+  class: HouseTemps
+  module: house_temperature
+  sampling_freq: 30
+  delta_history: 3600
+  dead_band: 0.5
+  zones:
+    Salón:
+      - sensor.t_salon
+      - sensor.salon_temperature
+    Dormitorio:
+      - sensor.dormitorio_temperature_rpi2mpd
+      - sensor.dormitorio_htu21d_temperature_rpi2mpd
+    Cocina:
+      - sensor.esp1_temperature
+    Plancha:
+      - sensor.esp3_temperature
+    Estudio:
+      - sensor.estudio_temperature_rpi2h
+  exterior:
+    - sensor.galeria_dht22_temperature
+    - sensor.galeria_impulsion_calefaccion
+    - sensor.galeria_retorno_calefaccion
+  exterior_estimated:
+    - sensor.villena_temperature
+    - sensor.dark_sky_temperature
+
 EnerpiPeakNotifier:
   class: EnerpiPeakNotifier
   module: enerpi_alarm
@@ -65,13 +104,13 @@ MorningAlarmClock:
   alarm_time: sensor.alarm_clock_time
   alarmdays: mon,tue,wed,thu,fri,sat
   constrain_input_boolean: input_boolean.alarm_clock_status
+  sunrise_duration: 300
   duration_volume_ramp_sec: 300
-  lights_alarm: group.luces_dormitorio
-  manual_trigger: input_boolean.manual_trigger_lacafetera
   max_volume: 25
   postponer_minutos: 7
   room_select: input_select.room_altavoces
-  sunrise_duration: 300
+  lights_alarm: group.luces_dormitorio
+  manual_trigger: input_boolean.manual_trigger_lacafetera
 
 MotionLightsSalon:
   class: MotionLights
@@ -118,8 +157,8 @@ ALARM:
   # Configuración entidades de HA
   # ------------------------------------------------------
   # Sensores de activación y switchs de uso (use default: True)
-  pirs: binary_sensor.pir_salon,binary_sensor.pir_estudio_rpi2h,binary_sensor.pir_dormitorio_rpi2mpd,binary_sensor.esp1_pir
-  use_pirs: switch.use_pir_salon,switch.use_pir_estudio_rpi2h,switch.use_pir_dormitorio_rpi2mpd,switch.use_esp1_pir
+  pirs: binary_sensor.pir_salon,binary_sensor.pir_estudio_rpi2h,binary_sensor.pir_dormitorio_rpi2mpd,binary_sensor.esp1_pir,binary_sensor.esp3_pir
+  use_pirs: switch.use_pir_salon,switch.use_pir_estudio_rpi2h,switch.use_pir_dormitorio_rpi2mpd,switch.use_esp1_pir,switch.use_esp3_pir
   camera_movs: binary_sensor.motioncam_salon,binary_sensor.motioncam_estudio
   use_cam_movs: switch.motioncam_escam,switch.motioncam_estudio
   extra_sensors: binary_sensor.vibration_sensor_rpi2h
@@ -159,12 +198,12 @@ ALARM:
   # Parámetro de tiempo de espera desde conexión a armado de alarma:
   espera_a_armado_sec: 15
   # Parámetro de tiempo de espera en pre-alarma para conectar la alarma si ocurre un nuevo evento:
-  reset_prealarm_time_sec: 20
+  reset_prealarm_time_sec: 15
   # Segundos entre captura de eventos con la alarma conectada
   min_delta_sec_events: 2
-  delta_secs_trigger: 10
+  delta_secs_trigger: 30
   # Número de eventos máximo a incluir por informe en correo electrónico. Se limita eliminando eventos de baja prioridad
-  num_max_eventos_por_informe: 50
+  num_max_eventos_por_informe: 10
   # Hora de envío del informe diario de eventos detectados (si los ha habido). Comentar con # para desactivar
   hora_informe: '9:30'
 

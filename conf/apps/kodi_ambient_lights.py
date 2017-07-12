@@ -18,6 +18,8 @@ import appdaemon.homeassistant as ha
 from homeassistant.components.media_player.kodi import (
     EVENT_KODI_CALL_METHOD_RESULT)
 
+from common import get_global, GLOBAL_DEFAULT_CHATID
+
 
 LOG_LEVEL = 'DEBUG'
 
@@ -67,7 +69,6 @@ class KodiAssistant(appapi.AppDaemon):
     _last_play = None
 
     _notifier_bot = 'telegram_bot'
-    _notifier_bot_target = None
     _ios_notifier = None
 
     def initialize(self):
@@ -86,17 +87,16 @@ class KodiAssistant(appapi.AppDaemon):
 
         self._media_player = conf_data.get('media_player')
         self._ios_notifier = conf_data.get('notifier').replace('.', '/')
-        self._notifier_bot_target = int(conf_data.get('bot_group_target'))
 
         # Listen for Kodi changes:
         self._last_play = ha.get_now()
         self.listen_state(self.kodi_state, self._media_player)
         self.listen_event(self._receive_kodi_result,
                           EVENT_KODI_CALL_METHOD_RESULT)
-        self.log('KodiAssist Initialized with dim_lights_on={}, '
-                 'dim_lights_off={}, off_lights={}.'
-                 .format(self._lights['dim']['on'], self._lights['dim']['off'],
-                         self._lights['off']))
+        # self.log('KodiAssist Initialized with dim_lights_on={}, '
+        #          'dim_lights_off={}, off_lights={}.'
+        #          .format(self._lights['dim']['on'], self._lights['dim']['off'],
+        #                  self._lights['off']))
 
     def _ask_for_playing_item(self):
         self.call_service('media_player/kodi_call_method',
@@ -174,8 +174,8 @@ class KodiAssistant(appapi.AppDaemon):
             if ('192.168.' not in img_url) \
                     and img_url.startswith('http://'):
                 img_url = img_url.replace('http:', 'https:')
-            self.log('MESSAGE: T={}, M={}, URL={}'
-                     .format(title, message, img_url))
+            # self.log('MESSAGE: T={}, M={}, URL={}'
+            #          .format(title, message, img_url))
         except KeyError as e:
             self.log('MESSAGE KeyError: {}; item={}'.format(e, item))
         return title, message, img_url
@@ -193,19 +193,20 @@ class KodiAssistant(appapi.AppDaemon):
 
     def _notify_telegram_message(self, item):
         title, message, img_url = self._get_kodi_info_params(item)
+        target = get_global(self, GLOBAL_DEFAULT_CHATID)
         if img_url is not None:
             data_photo = {
                 "url": img_url,
                 "keyboard": TELEGRAM_KEYBOARD_KODI,
                 "disable_notification": True}
             self.call_service('{}/send_photo'.format(self._notifier_bot),
-                              target=self._notifier_bot_target, **data_photo)
+                              target=target, **data_photo)
             message + "\n{}\nEND".format(img_url)
         data_msg = {"message": message, "title": '*{}*'.format(title),
                     "inline_keyboard": TELEGRAM_INLINEKEYBOARD_KODI,
                     "disable_notification": True}
         self.call_service('{}/send_message'.format(self._notifier_bot),
-                          target=self._notifier_bot_target, **data_msg)
+                          target=target, **data_msg)
 
     def _adjust_kodi_lights(self, play=True):
         k_l = self._lights['dim'][self._lights['state']] + self._lights['off']
@@ -259,8 +260,8 @@ class KodiAssistant(appapi.AppDaemon):
             self._is_playing_video = (
                 'media_content_type' in kodi_attrs
                 and kodi_attrs['media_content_type'] in TYPE_HA_ITEMS_NOTIFY)
-            self.log('KODI ATTRS: {}, is_playing_video={}'
-                     .format(kodi_attrs, self._is_playing_video))
+            # self.log('KODI ATTRS: {}, is_playing_video={}'
+            #          .format(kodi_attrs, self._is_playing_video))
             if self._is_playing_video:
                 self._ask_for_playing_item()
         elif ((new == 'idle') and self._is_playing_video) or (new == 'off'):

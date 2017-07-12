@@ -23,6 +23,8 @@ import json
 import pytz
 import requests
 
+from common import get_global, GLOBAL_DEFAULT_CHATID, GLOBAL_BASE_URL
+
 
 LOG_LEVEL = 'INFO'
 
@@ -166,8 +168,6 @@ class AlarmClock(appapi.AppDaemon):
     _volume_ramp_sec = None
     _weekdays_alarm = None
     _notifier = None
-    _notifier_bot = 'telegram_bot'
-    _notifier_bot_target = None
     _transit_time = None
     _phases_sunrise = []
     _tz = None
@@ -208,9 +208,7 @@ class AlarmClock(appapi.AppDaemon):
         self._selected_player = 'KODI'
         self._room_select = self.args.get('room_select', None)
         if self._room_select is not None:
-            # self._room_select = self.args.get('room_select', None)
             self._selected_player = self.get_state(entity_id=self._room_select)
-            self.log('selected_player: {}'.format(self._selected_player))
             self.listen_state(self.change_player, self._room_select)
 
         self._media_player_kodi = conf_data.get('media_player')
@@ -227,7 +225,6 @@ class AlarmClock(appapi.AppDaemon):
         self.listen_event(
             self.postpone_secuencia_despertador, 'postponer_despertador')
         self._notifier = conf_data.get('notifier').replace('.', '/')
-        self._notifier_bot_target = int(conf_data.get('bot_group_target'))
 
         self._lights_alarm = self.args.get('lights_alarm', None)
         total_duration = int(self.args.get('sunrise_duration', 60))
@@ -236,8 +233,8 @@ class AlarmClock(appapi.AppDaemon):
         self._transit_time = total_duration // len(self._phases_sunrise) + 1
 
         self._set_new_alarm_time()
-        self.log('INIT WITH NEXT ALARM IN: {:%d-%m-%Y %H:%M:%S}'
-                 .format(self._next_alarm), LOG_LEVEL)
+        self.log('INIT WITH NEXT ALARM IN: {:%d-%m-%Y %H:%M:%S} ({})'
+                 .format(self._next_alarm, self._selected_player), LOG_LEVEL)
 
     @property
     def play_in_kodi(self):
@@ -253,8 +250,8 @@ class AlarmClock(appapi.AppDaemon):
 
     def notify_alarmclock(self, ep_info):
         """Send notification with episode info."""
-        self.call_service('{}/send_message'.format(self._notifier_bot),
-                          target=self._notifier_bot_target,
+        self.call_service('telegram_bot/send_message',
+                          target=get_global(self, GLOBAL_DEFAULT_CHATID),
                           **_make_telegram_notification_episode(ep_info))
         self.call_service(self._notifier.replace('.', '/'),
                           **_make_ios_notification_episode(ep_info))
@@ -272,10 +269,8 @@ class AlarmClock(appapi.AppDaemon):
         if self._in_alarm_mode:
             if self.play_in_kodi and (self.get_state(
                     entity_id=self._media_player_kodi) == 'playing'):
-                self.call_service('media_player/media_stop',
+                self.call_service('media_player/turn_off',
                                   entity_id=self._media_player_kodi)
-                self.call_service('switch/turn_off',
-                                  entity_id='switch.kodi_tv_salon')
                 if self._manual_trigger is not None:
                     self._last_trigger = None
                     self.set_state(entity_id=self._manual_trigger, state='off')
@@ -338,8 +333,6 @@ class AlarmClock(appapi.AppDaemon):
     # noinspection PyUnusedLocal
     def _set_new_alarm_time(self, *args):
         if self._handle_alarm is not None:
-            # self.log('Cancelling timer "{}" -> {}'
-            #          .format(self._handle_alarm, self._next_alarm), LOG_LEVEL)
             self.cancel_timer(self._handle_alarm)
         str_time_alarm = self.get_state(entity_id=self._alarm_time_sensor)
         if ':' not in str_time_alarm:
@@ -351,8 +344,6 @@ class AlarmClock(appapi.AppDaemon):
         self._next_alarm = time_alarm - WARM_UP_TIME_DELTA
         self._handle_alarm = self.run_daily(
             self.run_alarm, self._next_alarm.time())
-        # self.log('Creating timer for {} --> {}'
-        #          .format(self._next_alarm, self._handle_alarm), LOG_LEVEL)
 
     def _set_sunrise_phase(self, *args_runin):
         self.log('SET_SUNRISE_PHASE: XY={xy_color}, '
@@ -360,15 +351,13 @@ class AlarmClock(appapi.AppDaemon):
                  .format(**args_runin[0]), 'DEBUG')
         if self._in_alarm_mode:
             self.call_service('light/turn_on', **args_runin[0])
-        # else:
-        #     self.log('ABORTED SET SUNRISE PHASE')
 
     # noinspection PyUnusedLocal
     def turn_on_lights_as_sunrise(self, *args):
         """Turn on the lights with a sunrise simulation.
 
          (done with multiple slow transitions)"""
-        self.log('RUN_SUNRISE')
+        # self.log('RUN_SUNRISE')
         self.call_service(
             'light/turn_off', entity_id=self._lights_alarm, transition=0)
         self.call_service(
@@ -406,8 +395,6 @@ class AlarmClock(appapi.AppDaemon):
         if params is not None:
             payload.update(params=params)
         r = requests.post(url_base, headers=headers, data=json.dumps(payload))
-        self.log('DEBUG MOPIDY {} COMMAND RESPONSE? -> {}'
-                 .format(command.upper(), r.content.decode()), 'DEBUG')
         if r.ok:
             res = json.loads(r.content.decode())
             if check_result and not res['result']:
@@ -430,8 +417,6 @@ class AlarmClock(appapi.AppDaemon):
                 volume_set = int(max(MIN_VOLUME,
                                      (delta_sec / self._volume_ramp_sec)
                                      * self._max_volume))
-            self.log('INCREASING MOPIDY VOLUME TO LEVEL {}'
-                     .format(volume_set), 'DEBUG')
             self.run_command_mopidy('core.mixer.set_volume',
                                     params=dict(volume=volume_set))
         else:
@@ -441,7 +426,6 @@ class AlarmClock(appapi.AppDaemon):
 
     def run_mopidy_stream_lacafetera(self, ep_info):
         """Play stream in mopidy."""
-        self.log('RUN_MOPIDY_STREAM_LACAFETERA', LOG_LEVEL)
         self.call_service('switch/turn_on', entity_id="switch.altavoz")
         self.run_command_mopidy('core.tracklist.clear', check_result=False)
         params = {"tracks": [{"__model__": "Track",
@@ -452,7 +436,7 @@ class AlarmClock(appapi.AppDaemon):
                                   ep_info['published'])}]}
         json_res = self.run_command_mopidy('core.tracklist.add', params=params)
         if json_res is not None:
-            self.log('Added track OK --> {}'.format(json_res))
+            # self.log('Added track OK --> {}'.format(json_res))
             if ("result" in json_res) and (len(json_res["result"]) > 0):
                 track_info = json_res["result"][0]
                 self.run_command_mopidy(
@@ -465,21 +449,21 @@ class AlarmClock(appapi.AppDaemon):
                     self._last_trigger = dt.datetime.now()
                     self.run_in(self.increase_volume, 5)
                     return True
-        self.log('MOPIDY NOT PRESENT??', 'ERROR')
+        self.error('MOPIDY NOT PRESENT??, mopidy json_res={}'
+                   .format(json_res), 'ERROR')
         return False
 
     def prepare_context_alarm(self):
         """Initialize the alarm context.
 
         (turn on devices, get ready the context, etc)"""
-        self.log('PREPARE_CONTEXT_ALARM', LOG_LEVEL)
+        # self.log('PREPARE_CONTEXT_ALARM', LOG_LEVEL)
         self.turn_on_morning_services(dict(delta_to_repeat=10))
         if self.play_in_kodi:
             return self.run_kodi_addon_lacafetera(mode='wakeup')
         else:
-            return self.call_service('switch/turn_on',
-                                     entity_id="switch.altavoz")
-            # self.run_mopidy_stream_lacafetera()
+            return self.call_service(
+                'switch/turn_on', entity_id="switch.altavoz")
 
     # noinspection PyUnusedLocal
     def trigger_service_in_alarm(self, *args):

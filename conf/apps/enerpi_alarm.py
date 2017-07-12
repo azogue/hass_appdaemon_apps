@@ -63,6 +63,8 @@ Automation task as a AppDaemon App for Home Assistant - enerPI PEAK POWER notifi
 import datetime as dt
 import appdaemon.appapi as appapi
 
+from common import get_global, GLOBAL_DEFAULT_CHATID
+
 
 LOG_LEVEL = 'INFO'
 DEFAULT_UPPER_LIMIT_KW = 4
@@ -90,7 +92,6 @@ class EnerpiPeakNotifier(appapi.AppDaemon):
     # _switch_on_off_app = None --> `constrain_input_boolean`
     _main_power = None
     _notifier = None
-    _notifier_bot = None
     _camera = None
     _slider_upper_limit = None
     _slider_lower_limit = None
@@ -104,7 +105,6 @@ class EnerpiPeakNotifier(appapi.AppDaemon):
         self._main_power = self.args.get('control')
         conf_data = dict(self.config['AppDaemon'])
         self._notifier = conf_data.get('notifier').replace('.', '/')
-        self._notifier_bot = conf_data.get('bot_group').replace('.', '/')
         self._camera = self.args.get('camera')
         self._min_time_upper = int(self.args.get('min_time_high', DEFAULT_MIN_TIME_UPPER_SEC))
         self._min_time_lower = int(self.args.get('min_time_low', DEFAULT_MIN_TIME_LOWER_SEC))
@@ -165,14 +165,12 @@ class EnerpiPeakNotifier(appapi.AppDaemon):
 
     def _make_telegram_message(self, reset_alarm=False):
         data_msg = self._get_notif_data(reset_alarm)
-        data_msg["data"] = {
-            # "keyboard": ['/luceson, /lucesoff', '/pitemps, /status', '/init'],
-            "inline_keyboard": [[('Luces ON', '/luceson'),
+        data_msg["target"] = get_global(self, GLOBAL_DEFAULT_CHATID)
+        data_msg["inline_keyboard"] = [[('Luces ON', '/luceson'),
                                  ('Luces OFF', '/lucesoff')],
                                 [('Potencia eléctrica', '/enerpi'),
                                  ('Grafs. enerPI', '/enerpitiles')],
-                                [('Status', '/status'), ('+', '/init')]],
-        }
+                                [('Status', '/status'), ('+', '/init')]]
         return data_msg
 
     # noinspection PyUnusedLocal
@@ -204,7 +202,7 @@ class EnerpiPeakNotifier(appapi.AppDaemon):
                 self.log('TRIGGER ALARM with msg={}'
                          .format(alarm_msg), level=LOG_LEVEL)
                 self.call_service(self._notifier, **alarm_msg)
-                self.call_service(self._notifier_bot,
+                self.call_service('telegram_bot/send_message',
                                   **self._make_telegram_message())
                 self._alarm_state = True
                 self._last_trigger = now
@@ -220,7 +218,7 @@ class EnerpiPeakNotifier(appapi.AppDaemon):
                         self._notifier,
                         **self._make_ios_message(reset_alarm=True))
                     self.call_service(
-                        self._notifier_bot,
+                        'telegram_bot/send_message',
                         **self._make_telegram_message(reset_alarm=True))
                     self._alarm_state = False
                     self._last_trigger = None

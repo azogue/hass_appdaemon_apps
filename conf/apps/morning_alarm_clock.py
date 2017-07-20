@@ -141,7 +141,7 @@ def _make_telegram_notification_episode(ep_info):
     data_msg = {"title": title, "message": message,
                 # "keyboard": TELEGRAM_KEYBOARD_ALARMCLOCK,
                 "inline_keyboard": TELEGRAM_INLINE_KEYBOARD_ALARMCLOCK,
-                "disable_notification": True}
+                "disable_notification": False}
     return data_msg
 
 

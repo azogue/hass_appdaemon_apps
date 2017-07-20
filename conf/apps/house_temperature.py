@@ -229,5 +229,5 @@ class HouseTemps(appapi.AppDaemon):
                 "message": message + temps_st,
                 "inline_keyboard": [cmd_mask.format('ON', 'on'),
                                     cmd_mask.format('OFF', 'off')],
-                "disable_notification": True,
+                "disable_notification": False,
                 "target": get_global(self, GLOBAL_DEFAULT_CHATID)}

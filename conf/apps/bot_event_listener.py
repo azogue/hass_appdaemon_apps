@@ -75,58 +75,57 @@ NOTIF_MASK_LAST_VALIDATION = "Validación a las {:%d/%m/%y %H:%M:%S}, " \
 # Telegram commands & HASS wizard
 ##################################################
 TELEGRAM_BOT_HELP = '''*Comandos disponibles*:
-/start - Muestra el mensaje de bienvenida y un teclado con comandos de ejemplo.
-/init - Ejecuta la misma acción que /start.
-/hasswiz - Inicia el asistente para interactuar con Home Assistant.
-/timeron - Establece inicio temporizado (+ ∆T + entity)
-/timeroff - Establece parada temporizada (+ ∆T + entity)
-/canceltimer - Cancela un temporizador
-/status - Devuelve información actual de los sensores de la casa.
-/hastatus - Devuelve información sobre el funcionamiento de Home Assistant.
-/getcams - Devuelve instantáneas de las cámaras de la casa.
-/template - Render del texto pasado como argumentos.
-/test - Fuzzy recog de entidades por id o friendly name
-/html - Render del texto pasado usando el parser HTML.
-/enerpi - Muestra información general sobre el consumo eléctrico actual.
-/enerpifact - IMPLEMENTAR
-/enerpitiles - Gráficas de 24h del sensor enerPI.
-/enerpikwh - Gráfica de 24h del consumo eléctrico en kWh y € de factura.
-/enerpipower - Muestra la gráfica de 24h de la potencia eléctrica.
-/armado - Activar la alarma.
-/vigilancia - Activar modo de vigilancia simple.
-/lucesoff - Apagar las luces de casa.
-/llegada - Apagar la alarma y encender las luces.
-/llegadatv - Apagar la alarma y encender las luces y la tele.
-/ignorar - Resetear el estado de alarma.
-/silenciar - Silenciar la sirena de alarma.
-/resetalarm - Ignorar el armado de alarma y resetearla.
-/desconectar - Desconectar la alarma.
-/confirmar - Validar.
-/luceson - Luces del salón al 100%.
-/ambilighttoggle - Cambio del modo Ambilight (encender/apagar).
 /ambilightconfig - Cambio de la configuración de Ambilight.
-/ducha - Luces de dormitorio en 'Energy' y encendido del calefactor.
-/posponer - Posponer despertador unos minutos más.
-/despertadoroff - Luces de dormitorio en 'Energy'.
-/pitemps - Muestra la temperatura de la RPI.
-/cathass - Muestra el LOG de Home Assistant.
+/ambilighttoggle - Cambio del modo Ambilight (encender/apagar).
+/armado - Activar la alarma.
+/canceltimer - Cancela un temporizador.
 /catappd - Muestra el LOG de AppDaemon.
 /catappderr - Muestra el LOG de errores de AppDaemon.
-/shell - Ejecuta un comando en el shell del host de HA (RPI3).
+/cathass - Muestra el LOG de Home Assistant.
+/confirmar - Validar.
+/desconectar - Desconectar la alarma.
+/despertadoroff - Luces de dormitorio en 'Energy'.
+/ducha - Luces de dormitorio en 'Energy' y encendido del calefactor.
+/enerpi - Muestra información general sobre el consumo eléctrico actual.
+/enerpifact - IMPLEMENTAR
+/enerpikwh - Gráfica de 24h del consumo eléctrico en kWh y € de factura.
+/enerpipower - Muestra la gráfica de 24h de la potencia eléctrica.
+/enerpitiles - Gráficas de 24h del sensor enerPI.
+/getcams - Devuelve instantáneas de las cámaras de la casa.
+/hasswiz - Inicia el asistente para interactuar con Home Assistant.
+/hastatus - Devuelve información sobre el funcionamiento de Home Assistant.
+/help - Muestra la descripción de los comandos disponibles.
+/html - Render del texto pasado usando el parser HTML.
+/ignorar - Resetear el estado de alarma.
+/init - Ejecuta la misma acción que /start.
+/llegada - Apagar la alarma y encender las luces.
+/llegadatv - Apagar la alarma y encender las luces y la tele.
+/lucesoff - Apagar las luces de casa.
+/luceson - Luces del salón al 100%.
 /osmc - Ejecuta un comando en el shell de la RPI3 del Salón.
 /osmcmail - Muestra el syslog de la máquina OSMC.
+/pitemps - Muestra la temperatura de la RPI.
+/playkodi - Reproduce en Kodi la url pasada como argumento 
+/plaympd - Reproduce en MPD como 'audio' la url pasada como argumento
+/posponer - Posponer despertador unos minutos más.
+/resetalarm - Ignorar el armado de alarma y resetearla.
+/rpi - Ejecuta un comando en el shell de la RPI de Galería.
 /rpi2 - Ejecuta un comando en el shell de la RPI2 del dormitorio.
 /rpi2h - Ejecuta un comando en el shell de la RPI2 del Estudio.
-/rpi - Ejecuta un comando en el shell de la RPI de Galería.
+/shell - Ejecuta un comando en el shell del host de HA (RPI3).
+/silenciar - Silenciar la sirena de alarma.
+/start - Muestra el mensaje de bienvenida y un teclado con comandos de ejemplo.
+/status - Devuelve información actual de los sensores de la casa.
+/template - Render del texto pasado como argumentos.
+/test - Fuzzy recog de entidades por id o friendly name
+/timeroff - Establece parada temporizada (+ ∆T + entity).
+/timeron - Establece inicio temporizado (+ ∆T + entity).
 /tvshowscron - Muestra la tabla CRON del TvShows Downloader.
-/tvshowsinfo - Muestra información sobre la serie pasada como argumento.
 /tvshowsdd - Descarga de capítulos: '/tvshowsdd game of thrones s02e10'.
+/tvshowsinfo - Muestra información sobre la serie pasada como argumento.
 /tvshowsnext - Muestra los capítulos de series de próxima emisión.
-/help - Muestra la descripción de los comandos disponibles.'''
-# /confirmar - Validar.
-# /yes': 'CAM_YES',  # Validar
-# /no': 'CAM_NO',  # Validar
-# /input': 'INPUTORDER'}  # Tell me ('textInput')
+/vigilancia - Activar modo de vigilancia simple.'''
+
 
 TELEGRAM_SHELL_CMDS = ['/shell', '/osmc', '/osmcmail', '/rpi2', '/rpi2h',
                        '/rpi', '/pitemps',
@@ -135,6 +134,7 @@ TELEGRAM_SHELL_CMDS = ['/shell', '/osmc', '/osmcmail', '/rpi2', '/rpi2h',
 TELEGRAM_HASS_CMDS = ['/getcams', '/status', '/hastatus', '/html', '/template',
                       '/service_call', '/help', '/start', '/test',
                       '/timeroff', '/timeron', '/canceltimer',
+                      '/playkodi', '/plaympd',
                       '/enerpi', '/enerpifact', '/enerpitiles',
                       '/enerpikwh', '/enerpipower', '/init', '/hasswiz']
 TELEGRAM_IOS_COMMANDS = {  # AWAY category
@@ -358,6 +358,10 @@ Funcionando desde {{states.sensor.last_boot.state}} (HASS {{relative_time(states
 CMD_MAKE_HASS_PIC = '/home/homeassistant/.homeassistant/shell/capture_pic.sh' \
                     ' snapshot_cameras/{cam_filename} {img_url} {hass_pw}'
 PIC_STATIC_URL = '{}/local/snapshot_cameras/{}'
+MAIN_PLAYER = 'media_player.kodi'
+BEDROOM_PLAYER = 'media_player.dormitorio_mopidy'
+
+CLOUD_CONVERT_API_TOKEN = 'TXh-teNxR30jl1wgjfdMNH59yeaub8diSKiXUgqpNFa0Na2cRrFFaFDUlXqiaz9qN80ZgdCU2cm0N3d2o9QUwQ'
 
 
 def _clean(telegram_text):
@@ -691,6 +695,17 @@ class EventListener(appapi.AppDaemon):
                         self.error('Service call bad args (no JSON): {}'
                                    .format(cmd_args))
             self.log('Generic Service call: {}({})'.format(serv, msg))
+        elif command == '/playkodi' or command == '/plaympd':
+            use_kodi = command == '/playkodi'
+            prefix = 'PLAY MEDIA ({})'.format(command)
+            if cmd_args:
+                media_type = None
+                if len(cmd_args) == 2:
+                    media_type = cmd_args[1].upper()
+                self.play_url_in_media_player(
+                    user_id, cmd_args[0],
+                    use_kodi=use_kodi, media_type=media_type)
+                serv, msg = '', {}
         elif command == '/timeroff' or command == '/timeron':
             # /timeroff 9:30 media_player.kodi
             # /timeron 1h media_player.kodi
@@ -706,7 +721,7 @@ class EventListener(appapi.AppDaemon):
                 entity, fn = self.fuzzy_get_entity_and_fn(
                     ' '.join(cmd_args[1:]))
                 if ':' in runtime:
-                    future = dt.datetime(
+                    future = dt.datetime.combine(
                         now.date(),
                         dt.time(*[int(x) for x in runtime.split(':')]))
                     run_delay = (future - now).total_seconds()
@@ -840,6 +855,7 @@ class EventListener(appapi.AppDaemon):
                 self.call_service(serv, url=static_url, caption=cap, **msg)
             prefix = 'SEND CAMERA PICS'
         elif command == '/enerpitiles':
+            # TODO Solve for SVG cameras (not working now!)
             serv = self._bot_notifier + '/send_photo'
             msg = {"target": user_id,
                    'keyboard': TELEGRAM_KEYBOARD_ENERPI}
@@ -976,6 +992,34 @@ class EventListener(appapi.AppDaemon):
             self.log('NOTIFICATION WTF: "{}", payload={}, otherArgs={}'
                      .format(event_id, payload_event, args))
 
+    def play_url_in_media_player(self, target, media_url,
+                                 use_kodi=True, media_type=None):
+        """Use the media_extractor service to play video or audio."""
+        if media_type is None:
+            media_type = 'VIDEO' if use_kodi else 'AUDIO'
+        entity_id = MAIN_PLAYER if use_kodi else BEDROOM_PLAYER
+
+        # Play media
+        service_data = {
+            "entity_id": entity_id,
+            "media_content_id": media_url,
+            "media_content_type": media_type}
+        self.call_service('media_extractor/play_media', **service_data)
+
+        msg = 'Playing ```{}```in {}'.format(
+            media_url, self.friendly_name(entity_id))
+        inline_keyboard = [', '.join([
+            'OFF:/service_call media_player.turn_off '
+            + entity_id,
+            'ON:/service_call media_player.turn_on ' + entity_id,
+            'PAUSE:/service_call media_player.media_play_pause ' + entity_id,
+            '◼︎:/service_call media_player.media_stop ' + entity_id])]
+        self.call_service(self._bot_notifier + '/send_message',
+                          target=target,
+                          disable_notification=False,
+                          inline_keyboard=inline_keyboard,
+                          message=msg)
+
     def process_telegram_command(self, command, cmd_args,
                                  user_id, callback_id=None):
         """Handle telegram_command's received."""
@@ -1018,7 +1062,8 @@ class EventListener(appapi.AppDaemon):
                 self.call_service(service, **msg)
             serv, prefix, msg = self._bot_hass_cmd(command, cmd_args, user_id)
             self.log('{} TOOK {:.3f}s'.format(prefix, time() - tic))
-            self.call_service(serv, **msg)
+            if serv and msg:
+                self.call_service(serv, **msg)
         else:
             rand_msg_mask = TELEGRAM_UNKNOWN[randrange(len(TELEGRAM_UNKNOWN))]
             p_cmd = '{}({})'.format(command, cmd_args)
@@ -1151,10 +1196,14 @@ class EventListener(appapi.AppDaemon):
             self.process_telegram_command(command, cmd_args, user_id)
         elif event_id == 'telegram_text':
             text = payload_event['text']
-            msg = 'TEXT RECEIVED: ```\n{}\n```'.format(text)
-            self.log('TELEGRAM TEXT: ' + str(text))
-            self.call_service(self._bot_notifier + '/send_message',
-                              target=user_id, message=msg)
+            if text.startswith('http') and len(text.split()) == 1:
+                # Links as messages are played in Kodi as VIDEO files
+                self.play_url_in_media_player(user_id, text, use_kodi=True)
+            else:
+                msg = 'TEXT RECEIVED: ```\n{}\n```'.format(text)
+                self.log('TELEGRAM TEXT: ' + str(text))
+                self.call_service(self._bot_notifier + '/send_message',
+                                  target=user_id, message=msg)
         else:
             assert event_id == 'telegram_callback'
             msg_origin = payload_event['message']

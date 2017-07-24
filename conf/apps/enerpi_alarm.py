@@ -63,8 +63,6 @@ Automation task as a AppDaemon App for Home Assistant - enerPI PEAK POWER notifi
 import datetime as dt
 import appdaemon.appapi as appapi
 
-from common import get_global, GLOBAL_DEFAULT_CHATID
-
 
 LOG_LEVEL = 'INFO'
 DEFAULT_UPPER_LIMIT_KW = 4
@@ -92,6 +90,7 @@ class EnerpiPeakNotifier(appapi.AppDaemon):
     # _switch_on_off_app = None --> `constrain_input_boolean`
     _main_power = None
     _notifier = None
+    _target_sensor = None
     _camera = None
     _slider_upper_limit = None
     _slider_lower_limit = None
@@ -105,6 +104,7 @@ class EnerpiPeakNotifier(appapi.AppDaemon):
         self._main_power = self.args.get('control')
         conf_data = dict(self.config['AppDaemon'])
         self._notifier = conf_data.get('notifier').replace('.', '/')
+        self._target_sensor = conf_data.get('chatid_sensor')
         self._camera = self.args.get('camera')
         self._min_time_upper = int(self.args.get('min_time_high', DEFAULT_MIN_TIME_UPPER_SEC))
         self._min_time_lower = int(self.args.get('min_time_low', DEFAULT_MIN_TIME_LOWER_SEC))
@@ -165,7 +165,7 @@ class EnerpiPeakNotifier(appapi.AppDaemon):
 
     def _make_telegram_message(self, reset_alarm=False):
         data_msg = self._get_notif_data(reset_alarm)
-        data_msg["target"] = get_global(self, GLOBAL_DEFAULT_CHATID)
+        data_msg["target"] = self.get_state(self._target_sensor)
         data_msg["inline_keyboard"] = [[('Luces ON', '/luceson'),
                                  ('Luces OFF', '/lucesoff')],
                                 [('Potencia eléctrica', '/enerpi'),

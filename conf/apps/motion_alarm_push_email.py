@@ -56,9 +56,6 @@ import requests
 from time import time, sleep
 import yaml
 
-from common import set_global, get_global, GLOBAL_ALARM_STATE
-
-# TODO Use get_global to query the family tracker (or even trigger a custom house_change_event from there?)
 
 # LOG_LEVEL = 'DEBUG'
 LOG_LEVEL = 'INFO'
@@ -295,7 +292,7 @@ class MotionAlarm(appapi.AppDaemon):
         # Main switches:
         self._alarm_on = self._listen_to_switch('main_switch', self._main_switch, self._main_switch_ch)
 
-        set_global(self, GLOBAL_ALARM_STATE, self._alarm_on)
+        # set_global(self, GLOBAL_ALARM_STATE, self._alarm_on)
         self._use_push_notifier = self._listen_to_switch('push_n', self._use_push_notifier_switch, self._main_switch_ch)
         self._silent_mode = self._listen_to_switch('silent_mode', self._silent_mode_switch, self._main_switch_ch)
 
@@ -583,7 +580,7 @@ class MotionAlarm(appapi.AppDaemon):
         with self._lock:
             self._handler_armado_alarma = None
             self._alarm_on = True
-            set_global(self, GLOBAL_ALARM_STATE, True)
+            # set_global(self, GLOBAL_ALARM_STATE, True)
         self._reset_session_data()
         self.append_event_data(dict(event_type=EVENT_ACTIVACION))
         self.text_notification()
@@ -602,7 +599,7 @@ class MotionAlarm(appapi.AppDaemon):
 
                 with self._lock:
                     self._alarm_on = False
-                    set_global(self, GLOBAL_ALARM_STATE, False)
+                    # set_global(self, GLOBAL_ALARM_STATE, False)
                     self._alarm_state = False
 
                 # Operación con relés en apagado de alarma:

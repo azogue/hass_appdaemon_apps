@@ -18,8 +18,6 @@ import appdaemon.homeassistant as ha
 from homeassistant.components.media_player.kodi import (
     EVENT_KODI_CALL_METHOD_RESULT)
 
-from common import get_global, GLOBAL_DEFAULT_CHATID
-
 
 LOG_LEVEL = 'DEBUG'
 
@@ -69,6 +67,7 @@ class KodiAssistant(appapi.AppDaemon):
     _last_play = None
 
     _notifier_bot = 'telegram_bot'
+    _target_sensor = None
     _ios_notifier = None
 
     def initialize(self):
@@ -87,6 +86,7 @@ class KodiAssistant(appapi.AppDaemon):
 
         self._media_player = conf_data.get('media_player')
         self._ios_notifier = conf_data.get('notifier').replace('.', '/')
+        self._target_sensor = conf_data.get('chatid_sensor')
 
         # Listen for Kodi changes:
         self._last_play = ha.get_now()
@@ -193,7 +193,7 @@ class KodiAssistant(appapi.AppDaemon):
 
     def _notify_telegram_message(self, item):
         title, message, img_url = self._get_kodi_info_params(item)
-        target = get_global(self, GLOBAL_DEFAULT_CHATID)
+        target = self.get_state(self._target_sensor)
         if img_url is not None:
             data_photo = {
                 "url": img_url,

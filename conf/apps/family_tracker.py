@@ -14,19 +14,10 @@ from dateutil.parser import parse
 import appdaemon.appapi as appapi
 import appdaemon.conf as conf
 
-from common import (set_global, get_global,
-                    GLOBAL_BASE_URL, GLOBAL_ANYBODY_HOME,
-                    GLOBAL_PEOPLE_HOME, GLOBAL_DEFAULT_CHATID)
-
-LOG_LEVEL = 'DEBUG'
-
-# GLOBAL_BASE_URL = 'base_url'
-# GLOBAL_ANYBODY_HOME = 'anybody_home'
-# GLOBAL_PEOPLE_HOME = 'people_home'
-# GLOBAL_DEFAULT_CHATID = 'default_chat_id'
 
 # DELAY_TO_SET_DEFAULT_TARGET = 1800  # sec
 DELAY_TO_SET_DEFAULT_TARGET = 120  # sec
+
 
 # noinspection PyClassHasNoInit
 class FamilyTracker(appapi.AppDaemon):
@@ -36,12 +27,16 @@ class FamilyTracker(appapi.AppDaemon):
     _telegram_targets = None
     _notifier = None
     _timer_update_target = None
+    _base_url = None
+    _anybody_home = None
 
     def initialize(self):
         """AppDaemon required method for app init."""
         config = dict(self.config['AppDaemon'])
         _chatids = [int(x) for x in config.get('bot_chatids').split(',')]
         self._notifier = config.get('notifier').replace('.', '/')
+        self._base_url = config.get('base_url').replace('.', '/')
+        self._anybody_home = False
 
         # Get home group
         home_group = self.args.get('home_group', 'group.family')
@@ -50,8 +45,8 @@ class FamilyTracker(appapi.AppDaemon):
         default_chat_id = config.get('bot_group_target')
         self._telegram_targets = {"default": ('Casa', default_chat_id)}
 
-        set_global(self, GLOBAL_DEFAULT_CHATID, default_chat_id)
-        set_global(self, GLOBAL_BASE_URL, config.get('base_url'))
+        # set_global(self, GLOBAL_DEFAULT_CHATID, default_chat_id)
+        # set_global(self, GLOBAL_BASE_URL, config.get('base_url'))
 
         people_track = self.args.get('people', {})
         # self.log("people_track: {}".format(people_track))
@@ -121,8 +116,7 @@ class FamilyTracker(appapi.AppDaemon):
         }
         data_telegram = {
             "title": '*{}*'.format(title),
-            "message": message + '\n[Go home]({})'.format(
-                get_global(self, GLOBAL_BASE_URL)),
+            "message": message + '\n[Go home]({})'.format(self._base_url),
             "inline_keyboard": keyboard,
             "target": telegram_target,
             "disable_notification": True,
@@ -158,14 +152,11 @@ class FamilyTracker(appapi.AppDaemon):
         elif not new_anybody_home or len(people_home) > 1:
             new_target = self._telegram_targets["default"][1]
 
-        # Set globals
-        anybody_home = get_global(self, GLOBAL_ANYBODY_HOME, False)
-        set_global(self, GLOBAL_ANYBODY_HOME, new_anybody_home)
-        set_global(self, GLOBAL_PEOPLE_HOME, people_home)
-        set_global(self, GLOBAL_DEFAULT_CHATID, new_target)
+        self.call_service(
+            'python_script/set_telegram_chatid_sensor', chat_id=new_target)
 
         # Todo entradas - salidas de personas individuales
-        if new_anybody_home != anybody_home:
+        if new_anybody_home != self._anybody_home:
             data_ios, data_telegram = self._make_notifications(
                 not new_anybody_home, new_target)
             # self.log('IOS NOTIF: {}'.format(data_ios))
@@ -173,14 +164,7 @@ class FamilyTracker(appapi.AppDaemon):
             self.call_service(self._notifier, **data_ios)
             self.call_service('telegram_bot/send_message',
                               **data_telegram)
-        # self.log('DEBUG Anyone at home? {} -> {} (target={})'
-        #          .format(self.global_vars[GLOBAL_ANYBODY_HOME],
-        #                  self.global_vars[GLOBAL_PEOPLE_HOME],
-        #                  self.global_vars[GLOBAL_DEFAULT_CHATID]))
-
-    # # noinspection PyUnusedLocal
-    # def (self, entity, attribute, old, new, kwargs):
-
+            self._anybody_home = new_anybody_home
 
     # noinspection PyUnusedLocal
     def track_zone_ch(self, entity, attribute, old, new, kwargs):
@@ -191,12 +175,10 @@ class FamilyTracker(appapi.AppDaemon):
         # Process changes
         self._who_is_at_home(True)
 
-        # clean_ent = entity.lstrip('device_tracker.')
-        clean_ent = entity
         if last_st != old:
-            self.log('!!TRACKING_STATE_CHANGE "{}" from "{}" [!="{}"'
+            self.log('!!BAD TRACKING_STATE_CHANGE "{}" from "{}" [!="{}"'
                      ', changed at {}] to "{}"'
-                     .format(clean_ent, old, last_st, last_ch, new))
+                     .format(entity, old, last_st, last_ch, new))
         else:
             self.log('TRACKING_STATE_CHANGE "{}" from "{}" [{}] to "{}"'
-                     .format(clean_ent, old, last_ch, new))
+                     .format(entity, old, last_ch, new))

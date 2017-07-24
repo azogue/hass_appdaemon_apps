@@ -23,8 +23,6 @@ import json
 import pytz
 import requests
 
-from common import get_global, GLOBAL_DEFAULT_CHATID, GLOBAL_BASE_URL
-
 
 LOG_LEVEL = 'INFO'
 
@@ -176,6 +174,7 @@ class AlarmClock(appapi.AppDaemon):
     _room_select = None
     _manual_trigger = None
     _selected_player = None
+    _target_sensor = None
 
     _media_player_kodi = None
     _media_player_mopidy = None
@@ -215,6 +214,7 @@ class AlarmClock(appapi.AppDaemon):
         self._media_player_mopidy = conf_data.get('media_player_mopidy')
         self._mopidy_ip = conf_data.get('mopidy_ip')
         self._mopidy_port = int(conf_data.get('mopidy_port'))
+        self._target_sensor = conf_data.get('chatid_sensor')
 
         # Trigger for last episode and boolean for play status
         self._manual_trigger = self.args.get('manual_trigger', None)
@@ -251,7 +251,7 @@ class AlarmClock(appapi.AppDaemon):
     def notify_alarmclock(self, ep_info):
         """Send notification with episode info."""
         self.call_service('telegram_bot/send_message',
-                          target=get_global(self, GLOBAL_DEFAULT_CHATID),
+                          target=self.get_state(self._target_sensor),
                           **_make_telegram_notification_episode(ep_info))
         self.call_service(self._notifier.replace('.', '/'),
                           **_make_ios_notification_episode(ep_info))

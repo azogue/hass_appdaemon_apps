@@ -15,6 +15,7 @@ AppDaemon:
   path_ha_conf: /home/homeassistant/.homeassistant
 
   notifier: notify.ios_iphone
+  chatid_sensor: sensor.telegram_default_chatid
   bot_chatids: [123456789],[123456790]
   bot_group: notify.telegram_group
   bot_group_target: [CHAT_ID_GROUP]
@@ -47,33 +48,6 @@ FamilyTracker:
     group.mary:
       chat_id_idx: 1
       extra_tracker: input_boolean.carmen_presence
-
-TemperatureVigil:
-  class: HouseTemps
-  module: house_temperature
-  sampling_freq: 30
-  delta_history: 3600
-  dead_band: 0.5
-  zones:
-    Salón:
-      - sensor.t_salon
-      - sensor.salon_temperature
-    Dormitorio:
-      - sensor.dormitorio_temperature_rpi2mpd
-      - sensor.dormitorio_htu21d_temperature_rpi2mpd
-    Cocina:
-      - sensor.esp1_temperature
-    Plancha:
-      - sensor.esp3_temperature
-    Estudio:
-      - sensor.estudio_temperature_rpi2h
-  exterior:
-    - sensor.galeria_dht22_temperature
-    - sensor.galeria_impulsion_calefaccion
-    - sensor.galeria_retorno_calefaccion
-  exterior_estimated:
-    - sensor.villena_temperature
-    - sensor.dark_sky_temperature
 
 EnerpiPeakNotifier:
   class: EnerpiPeakNotifier

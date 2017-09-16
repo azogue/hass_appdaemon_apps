@@ -14,7 +14,7 @@ For that, it talks with Kodi through its JSONRPC API by HA service calls.
 import datetime as dt
 from urllib import parse
 import appdaemon.appapi as appapi
-import appdaemon.homeassistant as ha
+import appdaemon.utils as utils
 from homeassistant.components.media_player.kodi import (
     EVENT_KODI_CALL_METHOD_RESULT)
 
@@ -45,11 +45,11 @@ TELEGRAM_INLINEKEYBOARD_KODI = [
 
 
 def _get_max_brightness_ambient_lights():
-    if ha.now_is_between('09:00:00', '19:00:00'):
+    if utils.now_is_between('09:00:00', '19:00:00'):
         return 200
-    elif ha.now_is_between('19:00:00', '22:00:00'):
+    elif utils.now_is_between('19:00:00', '22:00:00'):
         return 150
-    elif ha.now_is_between('22:00:00', '04:00:00'):
+    elif utils.now_is_between('22:00:00', '04:00:00'):
         return 75
     return 25
 
@@ -89,7 +89,7 @@ class KodiAssistant(appapi.AppDaemon):
         self._target_sensor = conf_data.get('chatid_sensor')
 
         # Listen for Kodi changes:
-        self._last_play = ha.get_now()
+        self._last_play = utils.get_now()
         self.listen_state(self.kodi_state, self._media_player)
         self.listen_event(self._receive_kodi_result,
                           EVENT_KODI_CALL_METHOD_RESULT)
@@ -115,10 +115,10 @@ class KodiAssistant(appapi.AppDaemon):
                              or self._item_playing != item)
                 self._is_playing_video = item['type'] in TYPE_ITEMS_NOTIFY
                 self._item_playing = item
-                delta = ha.get_now() - self._last_play
+                delta = utils.get_now() - self._last_play
                 if (self._is_playing_video and
                         (new_video or delta > dt.timedelta(minutes=20))):
-                    self._last_play = ha.get_now()
+                    self._last_play = utils.get_now()
                     self._adjust_kodi_lights(play=True)
                     # Notifications
                     self._notify_ios_message(self._item_playing)
@@ -266,7 +266,7 @@ class KodiAssistant(appapi.AppDaemon):
                 self._ask_for_playing_item()
         elif ((new == 'idle') and self._is_playing_video) or (new == 'off'):
             self._is_playing_video = False
-            self._last_play = ha.get_now()
+            self._last_play = utils.get_now()
             self.log('KODI STOP. old:{}, new:{}, type_lp={}'
                      .format(old, new, type(self._last_play)), LOG_LEVEL)
             # self._item_playing = None

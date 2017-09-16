@@ -1,0 +1,15 @@
+# ------------------------------------------------------
+# Apps
+# ------------------------------------------------------
+
+PublishStatesInMaster:
+  class: SlavePublisher
+  module: publish_states_in_master
+
+  master_ha_key: homehass
+  master_ha_url: http://192.168.1.13
+  slave_sufix: _rpi2h
+
+  raw_binary_sensors: binary_sensor.vibration_sensor_raw
+  raw_binary_sensors_sufijo: _raw
+  raw_binary_sensors_time_off: 2

@@ -180,9 +180,16 @@ class KodiAssistant(appapi.AppDaemon):
             self.log('MESSAGE KeyError: {}; item={}'.format(e, item))
         return title, message, img_url
 
+    def _valid_image_url(self, img_url):
+        if (img_url is not None) and img_url.startswith('http'):
+            return True
+        if img_url is not None:
+            self.error('BAD IMAGE URL: {}'.format(img_url), level='ERROR')
+        return False
+
     def _notify_ios_message(self, item):
         title, message, img_url = self._get_kodi_info_params(item)
-        if img_url is not None:
+        if self._valid_image_url(img_url):
             data_msg = {"title": title, "message": message,
                         "data": {"attachment": {"url": img_url},
                                  "push": {"category": "KODIPLAY"}}}
@@ -194,7 +201,7 @@ class KodiAssistant(appapi.AppDaemon):
     def _notify_telegram_message(self, item):
         title, message, img_url = self._get_kodi_info_params(item)
         target = self.get_state(self._target_sensor)
-        if img_url is not None:
+        if self._valid_image_url(img_url):
             data_photo = {
                 "url": img_url,
                 "keyboard": TELEGRAM_KEYBOARD_KODI,

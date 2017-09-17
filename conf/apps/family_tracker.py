@@ -45,9 +45,6 @@ class FamilyTracker(appapi.AppDaemon):
         default_chat_id = config.get('bot_group_target')
         self._telegram_targets = {"default": ('Casa', default_chat_id)}
 
-        # set_global(self, GLOBAL_DEFAULT_CHATID, default_chat_id)
-        # set_global(self, GLOBAL_BASE_URL, config.get('base_url'))
-
         people_track = self.args.get('people', {})
         # self.log("people_track: {}".format(people_track))
 
@@ -151,6 +148,12 @@ class FamilyTracker(appapi.AppDaemon):
                 zone_changed=False)
         elif not new_anybody_home or len(people_home) > 1:
             new_target = self._telegram_targets["default"][1]
+        else:
+            self.log("WHO IS AT HOME? people: {}, zone_changed:{}, target:{}"
+                       .format(people, zone_changed, new_target))
+
+        if new_target is None:
+            return
 
         self.call_service(
             'python_script/set_telegram_chatid_sensor', chat_id=new_target)

@@ -151,9 +151,6 @@ TELEGRAM_IOS_COMMANDS = {  # AWAY category
                          '/desconectar': 'ALARM_CANCEL',  # Desconectar alarma
                          # CONFIRM category
                          '/confirmar': 'CONFIRM_OK',  # Validar
-                         # CAMERA category
-                         '/yes': 'CAM_YES',  # Validar
-                         '/no': 'CAM_NO',  # Validar
                          # KODIPLAY category
                          '/luceson': 'LIGHTS_ON',  # Lights ON!
                          '/ambilighttoggle': 'HYPERION_TOGGLE',
@@ -1334,16 +1331,6 @@ class EventListener(appapi.AppDaemon):
                                 title="Validación")
             action_msg_log += 'Confirmation received'
             self.light_flash(XY_COLORS['yellow'], persistence=3, n_flashes=1)
-
-        # CAMERA category
-        elif action == 'CAM_YES':  # Validar
-            self.frontend_notif(action, origin)
-            action_msg_log += 'GREEN FLASHING'
-            self.light_flash(XY_COLORS['green'], persistence=3, n_flashes=1)
-        elif action == 'CAM_NO':  # Validar
-            self.frontend_notif(action, origin)
-            action_msg_log += 'RED FLASHING'
-            self.light_flash(XY_COLORS['red'], persistence=3, n_flashes=1)
 
         # KODIPLAY category
         elif action == 'LIGHTS_ON':  # Lights ON!

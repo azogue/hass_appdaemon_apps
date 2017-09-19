@@ -100,6 +100,7 @@ EVENT_TYPES = OrderedDict(zip([EVENT_INICIO, EVENT_ACTIVACION, EVENT_DESCONEXION
                                ('ALARMA!', "#f00a2d", 10, 'ALARMA ACTIVADA'),
                                ('en ALARMA', "#f0426a", 5, 'ALARMA ACTIVADA'),
                                ('Alarma encendida', "#f040aa", 0, 'ALARMA ACTIVADA')]))
+SOUND_MOTION = "US-EN-Morgan-Freeman-Motion-Detected.wav"
 
 
 def _read_hass_secret_conf(path_ha_conf):
@@ -138,7 +139,7 @@ class MotionAlarm(appapi.AppDaemon):
     _use_extra_sensors = None
     _dict_asign_switchs_inputs = None
 
-    _cameras = None
+    _videostreams = {}
     _cameras_jpg_ip = None
     _cameras_jpg_params = None
 
@@ -221,10 +222,14 @@ class MotionAlarm(appapi.AppDaemon):
         # self.log('_use_cams_movs: {}'.format(self._use_cams_movs))
         # self.log('use_extra_sensors: {}'.format(self._use_extra_sensors))
 
-        # Streams de vídeo (HA entities, URLs + PAYLOADS for request jpg images)
-        # TODO Usar cameras (como HA entity) para rich notif
-        self._cameras = self._listconf_param(self.args, 'cameras')
+        # Video streams asociados a sensores para notif
+        _streams = self._listconf_param(self.args, 'videostreams')
+        if _streams:
+            self._videostreams = {sensor: cam
+                                  for cam, list_triggers in _streams[0].items()
+                                  for sensor in list_triggers}
 
+        # Streams de vídeo (HA entities, URLs + PAYLOADS for request jpg images)
         self._cameras_jpg_ip = self._listconf_param(self.args, 'cameras_jpg_ip_secret', is_secret=True)
         self._cameras_jpg_params = self._listconf_param(self.args, 'cameras_jpg_params_secret',
                                                         is_secret=True, is_json=True, min_len=len(self._cameras_jpg_ip))
@@ -304,7 +309,7 @@ class MotionAlarm(appapi.AppDaemon):
         self._dict_use_inputs = {s_input: self._listen_to_switch(s_input, s_use, self._switch_usar_input)
                                  for s_input, s_use in zip(all_sensors, all_sensors_use)}
         self._dict_friendly_names = {s: self.get_state(s, attribute='friendly_name') for s in all_sensors}
-        self._dict_friendly_names.update({c: self.get_state(c, attribute='friendly_name') for c in self._cameras})
+        # self._dict_friendly_names.update({c: self.get_state(c, attribute='friendly_name') for c in self._videostreams})
         self._dict_sensor_classes = {s: self.get_state(s, attribute='device_class') for s in all_sensors}
 
         # Movement detection
@@ -853,6 +858,26 @@ class MotionAlarm(appapi.AppDaemon):
         # self.log('DEBUG PRE-ALARM PERSISTENT NOTIFICATION: {}'.format(params))
         self.persistent_notification(**params)
 
+    def _update_ios_notify_params(self, params, url_usar):
+        if ((self._alarm_state_entity_trigger is not None) and
+                (self._videostreams.get(self._alarm_state_entity_trigger))):
+            # Get the camera video stream as function of trigger
+            cam_entity = self._videostreams.get(
+                self._alarm_state_entity_trigger)
+            params.update(
+                data=dict(
+                    push=dict(badge=10, sound=SOUND_MOTION,
+                              category="camera"),
+                    entity_id=cam_entity,
+                    attachment=dict(url=url_usar)))
+        else:
+            params.update(
+                data=dict(
+                    push=dict(badge=10, sound=SOUND_MOTION,
+                              category="ALARMSOUNDED"),
+                    attachment=dict(url=url_usar)))
+        return params
+
     def periodic_alert_notification(self):
         """Notificación de recordatorio de alarma encendida."""
         if self._alarm_state:
@@ -868,9 +893,7 @@ class MotionAlarm(appapi.AppDaemon):
                 else:
                     url_usar = self._secrets['hass_base_url']
                 if 'ios' in service:
-                    params.update(data=dict(push=dict(badge=2, sound="US-EN-Morgan-Freeman-Motion-Detected.wav",
-                                                      category="ALARMSOUNDED"),
-                                            attachment=dict(url=url_usar)))
+                    params = self._update_ios_notify_params(params, url_usar)
                 elif 'pushbullet' in service:
                     # params.update(data=dict(url=url_usar))
                     params.update(target=self._secrets['pb_target'], data=dict(url=url_usar))
@@ -908,9 +931,8 @@ class MotionAlarm(appapi.AppDaemon):
                     else:
                         url_usar = self._secrets['hass_base_url']
                     if 'ios' in service:
-                        params.update(data=dict(push=dict(badge=1, sound="US-EN-Morgan-Freeman-Motion-Detected.wav",
-                                                          category="ALARMSOUNDED"),
-                                                attachment=dict(url=url_usar)))
+                        params = self._update_ios_notify_params(
+                            params, url_usar)
                     elif 'pushbullet' in service:
                         params.update(data=dict(url=url_usar))
                 # self.log('PUSH TEXT NOTIFICATION "{title}: {message}"'.format(**params))

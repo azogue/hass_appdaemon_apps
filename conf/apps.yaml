@@ -112,9 +112,21 @@ ALARM:
   # Si se define (off-> # comment), marca el tiempo máximo que estará la alarma conectada, si se dispara, en segundos
   max_time_alarm_on: 600
 
+  # Videostreams asociados a sensores
+  videostreams:
+    camera.escam_qf001:
+      - binary_sensor.motioncam_salon
+#      - binary_sensor.pir_dormitorio_rpi2mpd
+#      - binary_sensor.esp1_pir
+    camera.picamera_salon:
+      - binary_sensor.pir_salon
+    camera.picamera_estudio:
+      - binary_sensor.motioncam_estudio
+      - binary_sensor.pir_estudio_rpi2h
+      - binary_sensor.vibration_sensor_rpi2h
+      - binary_sensor.esp3_pir
+
   # Cámaras, ip y params para jpg request
-  # cameras: camera.escam_qf001,camera.picamera_salon,camera.picamera_estudio
-  cameras: camera.escam_qf001,camera.picamera_estudio
   # cameras_jpg_ip_secret: motioneye_jpg_cam_1,hasscam_jpg_cam_3,motioneye_jpg_cam_2
   # cameras_jpg_params_secret: foscam_url_cam_1_params,foscam_url_cam_2_params
   cameras_jpg_ip_secret: motioneye_jpg_cam_1,motioneye_jpg_cam_2

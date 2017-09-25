@@ -2,6 +2,8 @@
 """
 Automation task as a AppDaemon App for Home Assistant
 
+DEPRECATED --> Use mqtt_statestream, much better!
+
 AppDaemon App which posts any state change in one HASS instance
 (the local/main instance, as slave) to another HASS (the master instance).
 

@@ -1378,11 +1378,6 @@ class EventListener(appapi.AppDaemon):
             self.turn_off('input_boolean.manual_trigger_lacafetera')
             action_msg_log += 'Apagado de alarma'
 
-        # TODO remove EXECORDER iOS category with textInput not working!
-        elif action == 'INPUTORDER':  # Tell me ('textInput')
-            self.frontend_notif(action, origin)
-            action_msg_log += 'INPUT: {}'.format(origin)
-            self.light_flash(XY_COLORS['blue'], persistence=3, n_flashes=1)
         # Unrecognized cat
         else:
             action_msg_log += 'WTF: origin={}'.format(origin)

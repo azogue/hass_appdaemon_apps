@@ -1,9 +1,0 @@
-AppDaemon:
-  app_dir: /home/homeassistant/appdaemon_apps/apps
-  errorfile: /home/homeassistant/appdaemon_err.log
-  logfile: /home/homeassistant/appdaemon.log
-  threads: 10
-
-HASS:
-  ha_key: !secret ha_key
-  ha_url: !secret ha_url

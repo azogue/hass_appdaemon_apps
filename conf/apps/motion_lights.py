@@ -55,7 +55,7 @@ class MotionLights(appapi.AppDaemon):
             #     self._lights_motion_active[l] = self.get_state(l) == 'on'
             #     self.listen_state(self._light_motion_state, l)
             # Light Timeout
-            if motion_light_timeout_slider.startswith('input_slider'):
+            if motion_light_timeout_slider.startswith('input_number'):
                 self._motion_light_timeout = int(
                     round(float(self.get_state(motion_light_timeout_slider))))
                 self.listen_state(

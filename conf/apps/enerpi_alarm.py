@@ -9,7 +9,7 @@ Automation task as a AppDaemon App for Home Assistant - enerPI PEAK POWER notifi
       trigger:
         platform: template
         value_template: "{% if (states('sensor.enerpi_power')|float / 1000 >
-                            states.input_slider.enerpi_max_power.state|float) %}true{% else %}false{% endif %}"
+                            states.input_number.enerpi_max_power.state|float) %}true{% else %}false{% endif %}"
       condition:
         condition: and
         conditions:
@@ -38,7 +38,7 @@ Automation task as a AppDaemon App for Home Assistant - enerPI PEAK POWER notifi
       trigger:
         platform: template
         value_template: >
-            {{ states('sensor.enerpi_power')|float / 1000 < states.input_slider.enerpi_max_power_reset.state|float }}
+            {{ states('sensor.enerpi_power')|float / 1000 < states.input_number.enerpi_max_power_reset.state|float }}
       condition:
         condition: and
         conditions:

@@ -1336,8 +1336,8 @@ class EventListener(appapi.AppDaemon):
         elif action == 'LIGHTS_ON':  # Lights ON!
             self.frontend_notif(action, origin,
                                 mask=NOTIF_MASK_LIGHTS_ON, title="Lights ON!")
-            self.call_service('input_slider/select_value',
-                              entity_id="input_slider.light_main_slider_salon",
+            self.call_service('input_number/set_value',
+                              entity_id="input_number.light_main_slider_salon",
                               value=254)
             self.call_service('light/turn_on',
                               entity_id="light.salon", brightness=255)

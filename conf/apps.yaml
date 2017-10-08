@@ -21,8 +21,8 @@ EnerpiPeakNotifier:
   camera: camera.enerpi_tile_power
   constrain_input_boolean: input_boolean.switch_control_enerpi_max_power
   control: sensor.enerpi_power
-  max_power_kw: input_slider.enerpi_max_power
-  max_power_kw_reset: input_slider.enerpi_max_power_reset
+  max_power_kw: input_number.enerpi_max_power
+  max_power_kw_reset: input_number.enerpi_max_power_reset
   min_time_high: 15
   min_time_low: 60
 
@@ -61,7 +61,7 @@ MotionLightsSalon:
   constrain_start_time: sunset - 02:00:00
   lights_check_off: light.pie_sofa,light.lamparita,light.pie_tv,light.central
   lights_motion: light.bola_grande,light.bola_pequena,light.cuenco
-  motion_light_timeout: input_slider.light_duration_after_motion
+  motion_light_timeout: input_number.light_duration_after_motion
   pir: binary_sensor.pir_salon
 
 # ------------------------------------------------------

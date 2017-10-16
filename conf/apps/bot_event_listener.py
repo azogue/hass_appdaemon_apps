@@ -417,6 +417,9 @@ class EventListener(appapi.AppDaemon):
         [self.listen_event(self.receive_telegram_event, ev)
          for ev in ['telegram_command', 'telegram_text', 'telegram_callback']]
 
+        # Flash light event
+        self.listen_event(self.receive_flash_light_event, 'flash_light')
+
         # Alarm mode controller
         self.listen_state(self.alarm_mode_controller,
                           entity='input_select.alarm_mode')
@@ -970,6 +973,16 @@ class EventListener(appapi.AppDaemon):
         # Restore state
         self.run_in(_restore_state, run_in + persistence - 2,
                     entity_id=self._lights_notif, transition=1)
+
+    def receive_flash_light_event(self, event_id, payload_event, *args):
+        """Event listener for flash light events."""
+        color = payload_event.get('color', 'red')
+        flashes = payload_event.get('flashes', 1)
+        persistence = payload_event.get('persistence', 1)
+        self.log('flash_light_event received: {} - #{}/{}s'
+                 .format(color, flashes, persistence))
+        self.light_flash(XY_COLORS[color],
+                         persistence=persistence, n_flashes=flashes)
 
     def receive_ios_event(self, event_id, payload_event, *args):
         """Event listener."""

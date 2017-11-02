@@ -30,6 +30,14 @@ KodiMediaSelect:
   class: DynamicKodiInputSelect
   module: kodi_input_select
 
+KodiYoutube:
+  module: youtube_search
+  class: YoutubeSearch
+  input_select: input_select.youtube_videos
+  input_text: input_text.q_youtube
+  media_player: media_player.kodi
+  youtube_key: !secret youtube_key
+
 KodiNotifier:
   class: KodiAssistant
   module: kodi_ambient_lights

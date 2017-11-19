@@ -91,7 +91,7 @@ class FamilyTracker(appapi.AppDaemon):
             # Salida de casa:
             title = "¡Vuelve pronto!"
             message = "¿Apagamos luces o encendemos alarma?"
-            cat = "AWAY"
+            cat = "away"
             keyboard = ['Activar alarma:/armado',
                         'Activar vigilancia:/vigilancia',
                         'Apagar luces:/lucesoff, +:/init']
@@ -99,7 +99,7 @@ class FamilyTracker(appapi.AppDaemon):
             # Llegada:
             title = "Welcome home!"
             message = "¿Qué puedo hacer por ti?"
-            cat = "INHOME"
+            cat = "inhome"
             keyboard = ['Welcome:/llegada',
                         'Welcome + TV:/llegadatv',
                         'Ignorar:/ignorar, +:/init']

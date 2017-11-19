@@ -874,7 +874,7 @@ class MotionAlarm(appapi.AppDaemon):
             params.update(
                 data=dict(
                     push=dict(badge=10, sound=SOUND_MOTION,
-                              category="ALARMSOUNDED"),
+                              category="alarmsounded"),
                     attachment=dict(url=url_usar)))
         return params
 

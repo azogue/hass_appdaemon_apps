@@ -192,10 +192,10 @@ class KodiAssistant(appapi.AppDaemon):
         if self._valid_image_url(img_url):
             data_msg = {"title": title, "message": message,
                         "data": {"attachment": {"url": img_url},
-                                 "push": {"category": "KODIPLAY"}}}
+                                 "push": {"category": "kodiplay"}}}
         else:
             data_msg = {"title": title, "message": message,
-                        "data": {"push": {"category": "KODIPLAY"}}}
+                        "data": {"push": {"category": "kodiplay"}}}
         self.call_service(self._ios_notifier, **data_msg)
 
     def _notify_telegram_message(self, item):

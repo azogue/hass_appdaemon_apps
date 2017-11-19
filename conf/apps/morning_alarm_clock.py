@@ -126,7 +126,7 @@ def _make_ios_notification_episode(ep_info):
     return {"title": title, "message": message,
             "data": {"push": {"badge": 0,
                               "sound": "US-EN-Morgan-Freeman-Good-Morning.wav",
-                              "category": "ALARMCLOCK"},
+                              "category": "alarmclock"},
                      "attachment": {"url": img_url}}}
 
 
@@ -396,7 +396,11 @@ class AlarmClock(appapi.AppDaemon):
             payload.update(params=params)
         r = requests.post(url_base, headers=headers, data=json.dumps(payload))
         if r.ok:
-            res = json.loads(r.content.decode())
+            try:
+                res = json.loads(r.content.decode())
+            except json.decoder.JSONDecodeError:
+                self.log("ERROR PARSING MPD RESULT: {}".format(r.content))
+                return None
             if check_result and not res['result']:
                 self.error('RUN MOPIDY {} COMMAND BAD RESPONSE? -> {}'
                            .format(command.upper(), r.content.decode()))
@@ -426,12 +430,15 @@ class AlarmClock(appapi.AppDaemon):
 
     def run_mopidy_stream_lacafetera(self, ep_info):
         """Play stream in mopidy."""
+        self.log('DEBUG MPD: {}'.format(ep_info))
         self.call_service('switch/turn_on', entity_id="switch.altavoz")
         self.run_command_mopidy('core.tracklist.clear', check_result=False)
         params = {"tracks": [{"__model__": "Track",
                               "uri": MASK_URL_STREAM_MOPIDY.format(
                                   ep_info['episode']['episode_id']),
                               "name": ep_info['episode']['title'],
+                              # "artist": "Fernando Berlín",
+                              # "album": "La Cafetera",
                               "date": "{:%Y-%m-%d}".format(
                                   ep_info['published'])}]}
         json_res = self.run_command_mopidy('core.tracklist.add', params=params)

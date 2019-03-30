@@ -2,9 +2,7 @@
 A very simple Appdaemon app to query youtube videos with text from an
 `input_text`, populate an `input_select` with the results obtained,
 and play them in a Kodi `media_player` when selected.
-
 You need a Youtube API Key to run the search!
-
 The config needed to run this app:
 ```yaml
 ytb_search:
@@ -17,7 +15,8 @@ ytb_search:
 ```
 """
 
-import appdaemon.appapi as appapi
+# import appdaemon.appapi as appapi
+import appdaemon.plugins.hass.hassapi as hass
 import requests
 
 
@@ -45,7 +44,8 @@ def query_youtube_videos(str_query, max_results=20, is_normal_query=True,
 
 
 # noinspection PyClassHasNoInit
-class YoutubeSearch(appapi.AppDaemon):
+#class YoutubeSearch(appapi.AppDaemon):
+class YoutubeSearch(hass.Hass):
     """App that listens to the input text and select."""
 
     _ids_options = None
@@ -97,7 +97,9 @@ class YoutubeSearch(appapi.AppDaemon):
 
         if selected:
             self.log('PLAY MEDIA: {} [id={}]'.format(new, selected))
+
+            data = {"method": "Player.Open",
+                    "item": {"file": KODI_YOUTUBE_PLUGIN_MASK.format(selected)}}
+
             self.call_service(
-                'media_player/play_media', entity_id=self._media_player,
-                media_content_type="video",
-                media_content_id=KODI_YOUTUBE_PLUGIN_MASK.format(selected))
+                'media_player/kodi_call_method', entity_id=self._media_player, **data)
